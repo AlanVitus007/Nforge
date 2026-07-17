@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+
+{% block title %}Delete Paper | NForge{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm">
+    <div class="card-body">
+        <h2 class="card-title">Delete Paper</h2>
+        <p>Are you sure you want to delete <strong>{{ paper.title }}</strong>?</p>
+        <form method="post">
+            {% csrf_token %}
+            <button class="btn btn-danger" type="submit">Yes, delete</button>
+            <a class="btn btn-outline-secondary" href="{% url 'paper_detail' paper.pk %}">Cancel</a>
+        </form>
+    </div>
+</div>
+{% endblock %}

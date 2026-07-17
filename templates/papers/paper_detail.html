@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ paper.title }} | NForge{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start mb-3">
+            <div>
+                <h2 class="card-title">{{ paper.title }}</h2>
+                <p class="text-muted mb-0">By {{ paper.authors }}</p>
+            </div>
+            <div>
+                <a class="btn btn-outline-secondary me-2" href="{% url 'paper_edit' paper.pk %}">Edit</a>
+                <a class="btn btn-outline-danger" href="{% url 'paper_delete' paper.pk %}">Delete</a>
+            </div>
+        </div>
+
+        <p><strong>Journal:</strong> {{ paper.journal|default:'Not provided' }}</p>
+        <p><strong>Publication year:</strong> {{ paper.publication_year|default:'Not provided' }}</p>
+        <p><strong>Keywords:</strong> {{ paper.keywords|default:'Not provided' }}</p>
+        <p><strong>Project:</strong> {{ paper.project.title }}</p>
+        <p><strong>Abstract:</strong> {{ paper.abstract|default:'No abstract provided.' }}</p>
+
+        {% if paper.pdf_file %}
+            <a class="btn btn-outline-primary" href="{{ paper.pdf_file.url }}" target="_blank">Open PDF</a>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
