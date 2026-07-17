@@ -5,6 +5,8 @@ All database operations related to authentication
 should be placed here instead of views.py.
 """
 
+from django.contrib.auth import authenticate, login, logout
+
 from .models import CustomUser
 
 
@@ -12,25 +14,40 @@ def register_user(data):
     """
     Create a new user.
     """
-    pass
+    return CustomUser.objects.create_user(
+        username=data['username'],
+        email=data['email'],
+        password=data['password1'],
+    )
 
 
 def authenticate_user(request):
     """
     Authenticate user.
     """
-    pass
+    username = request.POST.get('username')
+    password = request.POST.get('password')
+
+    if not username or not password:
+        return None
+
+    user = authenticate(request, username=username, password=password)
+    if user is not None:
+        login(request, user)
+        return user
+
+    return None
 
 
 def logout_user(request):
     """
     Logout user.
     """
-    pass
+    logout(request)
 
 
 def update_profile(user, data):
     """
     Update profile.
     """
-    pass
+    return None
