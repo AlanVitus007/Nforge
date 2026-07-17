@@ -36,4 +36,5 @@ class PaperTests(TestCase):
         paper = Paper.objects.get(title='Neural Networks Overview')
         self.assertEqual(paper.owner, self.user)
         self.assertEqual(paper.project, self.project)
-        self.assertTrue(paper.pdf_file.name.endswith('paper.pdf'))
+        self.assertTrue(paper.pdf_file.name.startswith('papers/'))
+        self.assertTrue(paper.pdf_file.name.endswith('.pdf'))

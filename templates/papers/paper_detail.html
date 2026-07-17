@@ -23,8 +23,10 @@
         <p><strong>Abstract:</strong> {{ paper.abstract|default:'No abstract provided.' }}</p>
 
         {% if paper.pdf_file %}
-            <a class="btn btn-outline-primary" href="{{ paper.pdf_file.url }}" target="_blank">Open PDF</a>
+            <a class="btn btn-outline-primary me-2" href="{{ paper.pdf_file.url }}" target="_blank">Open PDF</a>
         {% endif %}
+        <a class="btn btn-outline-info me-2" href="{% url 'ai_insights' paper.pk %}">AI Insights</a>
+        <a class="btn btn-outline-success" href="{% url 'ai_chat' paper.pk %}">Ask AI</a>
     </div>
 </div>
 {% endblock %}

@@ -22,4 +22,5 @@ urlpatterns = [
     path('', include('accounts.urls')),
     path('projects/', include('projects.urls')),
     path('papers/', include('papers.urls')),
+    path('ai/', include('ai_engine.urls')),
 ]
