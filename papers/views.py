@@ -1,6 +1,7 @@
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect, render
 
+from ai_engine.services import answer_question, detect_research_gaps, extract_keywords, extract_pdf_text, summarize_text
 from .forms import PaperForm
 from .models import Paper
 
@@ -28,7 +29,30 @@ def paper_create_view(request):
 @login_required
 def paper_detail_view(request, pk):
     paper = get_object_or_404(Paper, pk=pk, owner=request.user)
-    return render(request, 'papers/paper_detail.html', {'paper': paper})
+    extracted_text = ''
+    if paper.pdf_file:
+        extracted_text = extract_pdf_text(paper.pdf_file.path)
+    if not extracted_text:
+        extracted_text = paper.abstract or ''
+
+    summary = summarize_text(extracted_text) if extracted_text else 'No summary available yet.'
+    keywords = extract_keywords(extracted_text) if extracted_text else []
+    gaps = detect_research_gaps(extracted_text, [paper.abstract or '']) if extracted_text else []
+    answer = ''
+    if request.method == 'POST':
+        question = request.POST.get('question', '').strip()
+        if question:
+            answer = answer_question(question, extracted_text)
+
+    context = {
+        'paper': paper,
+        'summary': summary,
+        'keywords': keywords,
+        'gaps': gaps,
+        'answer': answer,
+        'extracted_text': extracted_text,
+    }
+    return render(request, 'papers/paper_detail.html', context)
 
 
 @login_required
