@@ -1,13 +1,13 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Profile | NForge</title>
-</head>
-<body>
-    <h2>Profile</h2>
-    <p>Welcome, {{ user.username }}!</p>
-    <p><a href="{% url 'logout' %}">Logout</a></p>
-</body>
-</html>
+{% extends 'base.html' %}
+
+{% block title %}Profile | NForge{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm">
+    <div class="card-body">
+        <h2 class="card-title">Profile</h2>
+        <p class="lead">Welcome, {{ user.username }}!</p>
+        <p class="mb-0"><a class="btn btn-outline-secondary" href="{% url 'logout' %}">Logout</a></p>
+    </div>
+</div>
+{% endblock %}

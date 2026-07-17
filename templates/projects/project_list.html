@@ -1,0 +1,28 @@
+{% extends 'base.html' %}
+
+{% block title %}Projects | NForge{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>Projects</h2>
+    <a class="btn btn-primary" href="{% url 'project_create' %}">New Project</a>
+</div>
+
+{% if projects %}
+    <div class="row">
+        {% for project in projects %}
+            <div class="col-md-6 mb-3">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <h5 class="card-title">{{ project.title }}</h5>
+                        <p class="card-text">{{ project.description|default:'No description provided.' }}</p>
+                        <span class="badge bg-info text-dark">{{ project.get_status_display }}</span>
+                    </div>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+{% else %}
+    <p class="text-muted">No projects yet. Create your first one.</p>
+{% endif %}
+{% endblock %}
