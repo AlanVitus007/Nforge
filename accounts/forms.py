@@ -39,3 +39,17 @@ class RegisterForm(forms.Form):
 
 class ProfileForm(forms.Form):
     pass
+
+
+from django.contrib.auth.forms import UserCreationForm, UserChangeForm
+
+class CustomUserCreationForm(UserCreationForm):
+    class Meta(UserCreationForm.Meta):
+        model = CustomUser
+        fields = ("username", "email", "role", "institution", "profile_picture")
+
+
+class CustomUserChangeForm(UserChangeForm):
+    class Meta(UserChangeForm.Meta):
+        model = CustomUser
+        fields = "__all__"
