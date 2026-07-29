@@ -1,0 +1,355 @@
+/* ==========================================
+   NForge Design System
+   File: topbar.css
+========================================== */
+
+/* ===============================
+   Topbar
+================================ */
+
+.topbar {
+    position: sticky;
+    top: 0;
+
+    height: var(--topbar-height);
+
+    background: var(--topbar-background);
+
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+
+    border-bottom: 1px solid var(--border);
+
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+
+    padding: 0 32px;
+
+    z-index: 900;
+
+    transition: all var(--transition);
+}
+
+/* ===============================
+   Left Section
+================================ */
+
+.topbar-left {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+}
+
+/* ===============================
+   Sidebar Toggle
+================================ */
+
+.sidebar-toggle {
+
+    width: 46px;
+    height: 46px;
+
+    border-radius: var(--radius-md);
+
+    display: flex;
+    justify-content: center;
+    align-items: center;
+
+    cursor: pointer;
+
+    color: var(--text-secondary);
+
+    transition: all var(--transition-fast);
+}
+
+.sidebar-toggle:hover {
+
+    background: var(--background-secondary);
+
+    color: var(--color-primary);
+
+}
+
+/* ===============================
+   Search
+================================ */
+
+.search-bar {
+
+    width: 460px;
+    max-width: 100%;
+
+    height: 50px;
+
+    display: flex;
+    align-items: center;
+
+    gap: 12px;
+
+    background: var(--background-secondary);
+
+    border: 1px solid transparent;
+
+    border-radius: var(--radius-lg);
+
+    padding: 0 18px;
+
+    transition: all var(--transition-fast);
+}
+
+.search-bar:hover {
+
+    border-color: var(--border);
+
+}
+
+.search-bar:focus-within {
+
+    border-color: var(--color-primary);
+
+    box-shadow: 0 0 0 4px rgba(37,99,235,.12);
+
+}
+
+.search-bar i {
+
+    color: var(--text-muted);
+
+    font-size: 1rem;
+
+}
+
+.search-bar input {
+
+    flex: 1;
+
+    background: transparent;
+
+    border: none;
+
+    outline: none;
+
+    color: var(--text-primary);
+
+    font-size: .95rem;
+
+}
+
+.search-bar input::placeholder {
+
+    color: var(--text-muted);
+
+}
+
+/* ===============================
+   Right Section
+================================ */
+
+.top-actions {
+
+    display: flex;
+    align-items: center;
+
+    gap: 14px;
+}
+
+/* ===============================
+   Icon Buttons
+================================ */
+
+.icon-btn {
+
+    width: 46px;
+    height: 46px;
+
+    border-radius: var(--radius-md);
+
+    display: flex;
+    justify-content: center;
+    align-items: center;
+
+    background: var(--surface);
+
+    border: 1px solid var(--border);
+
+    color: var(--text-secondary);
+
+    cursor: pointer;
+
+    transition: all var(--transition-fast);
+}
+
+.icon-btn:hover {
+
+    color: white;
+
+    background: var(--gradient-primary);
+
+    border-color: transparent;
+
+    transform: translateY(-2px);
+
+    box-shadow: var(--shadow-md);
+
+}
+
+.icon-btn i {
+
+    font-size: 1.1rem;
+
+}
+
+/* ===============================
+   User Button
+================================ */
+
+.user-button {
+
+    display: flex;
+    align-items: center;
+
+    gap: 10px;
+
+    height: 46px;
+
+    padding: 0 16px;
+
+    background: var(--surface);
+
+    border: 1px solid var(--border);
+
+    border-radius: var(--radius-md);
+
+    color: var(--text-primary);
+
+    font-weight: 500;
+
+    transition: all var(--transition-fast);
+
+}
+
+.user-button:hover {
+
+    border-color: var(--color-primary);
+
+    color: var(--color-primary);
+
+}
+
+/* User Avatar */
+
+.user-avatar {
+
+    width: 34px;
+    height: 34px;
+
+    border-radius: 50%;
+
+    object-fit: cover;
+
+}
+
+/* ===============================
+   Dropdown
+================================ */
+
+.dropdown-menu {
+
+    border: none;
+
+    border-radius: var(--radius-lg);
+
+    background: var(--surface);
+
+    box-shadow: var(--shadow-lg);
+
+    padding: 10px;
+
+    margin-top: 12px;
+
+}
+
+.dropdown-item {
+
+    border-radius: var(--radius-sm);
+
+    padding: 10px 14px;
+
+    transition: all var(--transition-fast);
+
+}
+
+.dropdown-item:hover {
+
+    background: var(--background-secondary);
+
+    color: var(--color-primary);
+
+}
+
+/* ===============================
+   Notification Badge
+================================ */
+
+.notification {
+
+    position: relative;
+
+}
+
+.notification::after {
+
+    content: "";
+
+    position: absolute;
+
+    top: 10px;
+    right: 10px;
+
+    width: 9px;
+    height: 9px;
+
+    border-radius: 50%;
+
+    background: var(--danger);
+
+    border: 2px solid var(--surface);
+
+}
+
+/* ===============================
+   Mobile
+================================ */
+
+@media (max-width: 992px) {
+
+    .search-bar {
+
+        width: 260px;
+
+    }
+
+}
+
+@media (max-width: 768px) {
+
+    .topbar {
+
+        padding: 0 18px;
+
+    }
+
+    .search-bar {
+
+        display: none;
+
+    }
+
+    .user-button span {
+
+        display: none;
+
+    }
+
+}

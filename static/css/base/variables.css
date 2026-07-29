@@ -1,0 +1,175 @@
+/* ==========================================
+   NForge Design System
+   File: variables.css
+   ========================================== */
+
+:root {
+
+    /* ==========================================
+       Brand Colors (Logo Inspired)
+       ========================================== */
+
+    --color-primary: #2563EB;
+    --color-secondary: #4F46E5;
+    --color-accent: #7C3AED;
+    --color-cyan: #1EA7FF;
+
+    /* Brand Gradient */
+
+    --gradient-primary: linear-gradient(
+        135deg,
+        #1EA7FF 0%,
+        #2563EB 35%,
+        #4F46E5 70%,
+        #7C3AED 100%
+    );
+
+    --gradient-hover: linear-gradient(
+        135deg,
+        #0EA5E9 0%,
+        #1D4ED8 40%,
+        #4338CA 70%,
+        #6D28D9 100%
+    );
+
+    /* ==========================================
+       Light Theme
+       ========================================== */
+
+    --background: #F6F8FC;
+    --background-secondary: #EEF2F7;
+
+    --surface: #FFFFFF;
+    --surface-hover: #F8FAFC;
+
+    --text-primary: #0F172A;
+    --text-secondary: #64748B;
+    --text-muted: #94A3B8;
+
+    --border: #E2E8F0;
+    --divider: #CBD5E1;
+
+    /* Status */
+
+    --success: #22C55E;
+    --warning: #F59E0B;
+    --danger: #EF4444;
+    --info: #0EA5E9;
+
+    /* ==========================================
+       Sidebar
+       ========================================== */
+
+    --sidebar-width: 280px;
+    --sidebar-background: #FFFFFF;
+    --sidebar-text: #475569;
+    --sidebar-active-text: #FFFFFF;
+
+    /* ==========================================
+       Topbar
+       ========================================== */
+
+    --topbar-height: 80px;
+    --topbar-background: rgba(255,255,255,.90);
+
+    /* ==========================================
+       Cards
+       ========================================== */
+
+    --card-background: #FFFFFF;
+
+    --card-shadow:
+        0 8px 25px rgba(15,23,42,.06);
+
+    --card-hover-shadow:
+        0 15px 35px rgba(15,23,42,.12);
+
+    /* ==========================================
+       Buttons
+       ========================================== */
+
+    --button-radius: 14px;
+
+    /* ==========================================
+       Inputs
+       ========================================== */
+
+    --input-background: #FFFFFF;
+
+    --input-border: #D1D5DB;
+
+    --input-focus: #2563EB;
+
+    /* ==========================================
+       Radius
+       ========================================== */
+
+    --radius-sm: 10px;
+    --radius-md: 14px;
+    --radius-lg: 18px;
+    --radius-xl: 24px;
+    --radius-round: 999px;
+
+    /* ==========================================
+       Shadows
+       ========================================== */
+
+    --shadow-sm:
+        0 2px 8px rgba(0,0,0,.05);
+
+    --shadow-md:
+        0 8px 25px rgba(15,23,42,.08);
+
+    --shadow-lg:
+        0 20px 45px rgba(15,23,42,.15);
+
+    /* ==========================================
+       Animation
+       ========================================== */
+
+    --transition-fast: .2s ease;
+
+    --transition: .3s ease;
+
+    --transition-slow: .5s ease;
+
+}
+
+/* ==========================================
+   Dark Theme
+   ========================================== */
+
+[data-theme="dark"] {
+
+    --background: #0F172A;
+    --background-secondary: #111827;
+
+    --surface: #1E293B;
+    --surface-hover: #263548;
+
+    --text-primary: #F8FAFC;
+    --text-secondary: #CBD5E1;
+    --text-muted: #94A3B8;
+
+    --border: #334155;
+    --divider: #475569;
+
+    --sidebar-background: #111827;
+    --sidebar-text: #CBD5E1;
+    --sidebar-active-text: #FFFFFF;
+
+    --topbar-background: rgba(17,24,39,.92);
+
+    --card-background: #1E293B;
+
+    --input-background: #1E293B;
+    --input-border: #475569;
+    --input-focus: #3B82F6;
+
+    --card-shadow:
+        0 10px 30px rgba(0,0,0,.35);
+
+    --card-hover-shadow:
+        0 15px 40px rgba(0,0,0,.5);
+
+}
