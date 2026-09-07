@@ -1,4 +1,6 @@
 from sentence_transformers import SentenceTransformer
+from .models import PaperChunk
+
 
 
 def split_text(text, chunk_size=1000, overlap=200):
@@ -60,3 +62,32 @@ def generate_embedding(text):
     embedding = model.encode(text)
 
     return embedding.tolist()
+
+
+
+def create_paper_chunks(paper):
+    """
+    Split a paper's extracted text into chunks and save them
+    in the database.
+    """
+
+    if not paper.extracted_text:
+        return []
+
+    # Remove existing chunks so the function can safely be run again.
+    paper.chunks.all().delete()
+
+    chunks = split_text(paper.extracted_text)
+
+    paper_chunks = []
+
+    for index, chunk_text in enumerate(chunks):
+        paper_chunk = PaperChunk.objects.create(
+            paper=paper,
+            chunk_index=index,
+            text=chunk_text,
+        )
+
+        paper_chunks.append(paper_chunk)
+
+    return paper_chunks
