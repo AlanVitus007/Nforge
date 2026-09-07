@@ -55,6 +55,28 @@ function Projects() {
             setCreating(false);
         }
     };
+    const handleDelete = async (projectId, projectTitle) => {
+        const confirmed = window.confirm(
+            `Are you sure you want to delete "${projectTitle}"?\n\nAll papers belonging to this project will also be deleted.`
+        );
+
+        if (!confirmed) {
+            return;
+        }
+
+        try {
+            setError("");
+
+            await api.delete(`/projects/${projectId}/`);
+
+            setProjects((currentProjects) =>
+                currentProjects.filter((project) => project.id !== projectId)
+            );
+        } catch (err) {
+            console.error(err);
+            setError("Failed to delete project.");
+        }
+    };
 
     return (
         <div>
@@ -120,6 +142,12 @@ function Projects() {
                                 </h3>
 
                                 <p>{project.description || "No description."}</p>
+                                <button
+                                    type="button"
+                                    onClick={() => handleDelete(project.id, project.title)}
+                                >
+                                    Delete Project
+                                </button>
                             </div>
                         ))}
                     </div>
