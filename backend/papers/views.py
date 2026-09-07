@@ -1,5 +1,8 @@
+import fitz
+
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, permissions
+
 from projects.models import Project
 from .models import Paper
 from .serializers import PaperSerializer
@@ -19,12 +22,37 @@ class PaperListCreateView(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        project = get_project_for_user(self.kwargs['project_id'], self.request.user)
-        return Paper.objects.filter(project=project).order_by('-uploaded_at')
+        project = get_project_for_user(
+            self.kwargs['project_id'],
+            self.request.user
+        )
+        return Paper.objects.filter(
+            project=project
+        ).order_by('-uploaded_at')
 
     def perform_create(self, serializer):
-        project = get_project_for_user(self.kwargs['project_id'], self.request.user)
-        serializer.save(project=project)
+        project = get_project_for_user(
+            self.kwargs['project_id'],
+            self.request.user
+        )
+
+        paper = serializer.save(project=project)
+
+        try:
+            document = fitz.open(paper.file.path)
+
+            extracted_text = ""
+
+            for page in document:
+                extracted_text += page.get_text()
+
+            document.close()
+
+            paper.extracted_text = extracted_text
+            paper.save(update_fields=["extracted_text"])
+
+        except Exception as e:
+            print(f"PDF text extraction failed: {e}")
 
 
 class PaperDetailView(generics.RetrieveDestroyAPIView):
@@ -36,5 +64,13 @@ class PaperDetailView(generics.RetrieveDestroyAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_object(self):
-        project = get_project_for_user(self.kwargs['project_id'], self.request.user)
-        return get_object_or_404(Paper, pk=self.kwargs['paper_id'], project=project)
+        project = get_project_for_user(
+            self.kwargs['project_id'],
+            self.request.user
+        )
+
+        return get_object_or_404(
+            Paper,
+            pk=self.kwargs['paper_id'],
+            project=project
+        )

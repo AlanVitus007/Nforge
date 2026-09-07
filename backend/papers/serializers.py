@@ -8,7 +8,7 @@ class PaperSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Paper
-        fields = ('id', 'project', 'title', 'file', 'uploaded_at')
+        fields = ('id', 'project', 'title', 'file', 'uploaded_at', 'extracted_text')
         read_only_fields = ('id', 'project', 'uploaded_at')
 
     def validate_file(self, value):
