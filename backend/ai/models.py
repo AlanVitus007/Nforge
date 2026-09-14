@@ -8,10 +8,9 @@ class PaperChunk(models.Model):
         on_delete=models.CASCADE,
         related_name="chunks",
     )
-
     chunk_index = models.PositiveIntegerField()
     text = models.TextField()
-
+    embedding = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

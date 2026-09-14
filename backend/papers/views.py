@@ -2,6 +2,7 @@ import fitz
 
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, permissions
+from ai.services import create_paper_chunks
 
 from projects.models import Project
 from .models import Paper
@@ -30,29 +31,31 @@ class PaperListCreateView(generics.ListCreateAPIView):
             project=project
         ).order_by('-uploaded_at')
 
-    def perform_create(self, serializer):
-        project = get_project_for_user(
-            self.kwargs['project_id'],
-            self.request.user
-        )
+def perform_create(self, serializer):
+    project = get_project_for_user(
+        self.kwargs["project_id"],
+        self.request.user
+    )
 
-        paper = serializer.save(project=project)
+    paper = serializer.save(project=project)
 
-        try:
-            document = fitz.open(paper.file.path)
+    try:
+        document = fitz.open(paper.file.path)
 
-            extracted_text = ""
+        extracted_text = ""
 
-            for page in document:
-                extracted_text += page.get_text()
+        for page in document:
+            extracted_text += page.get_text()
 
-            document.close()
+        document.close()
 
-            paper.extracted_text = extracted_text
-            paper.save(update_fields=["extracted_text"])
+        paper.extracted_text = extracted_text
+        paper.save(update_fields=["extracted_text"])
 
-        except Exception as e:
-            print(f"PDF text extraction failed: {e}")
+        create_paper_chunks(paper)
+
+    except Exception as e:
+        print(f"PDF processing failed: {e}")
 
 
 class PaperDetailView(generics.RetrieveDestroyAPIView):
