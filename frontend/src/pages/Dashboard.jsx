@@ -2,9 +2,11 @@ import React, { useContext, useEffect, useState } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import Card from '../components/Card';
+import Button from '../components/Button';
 
 const Dashboard = () => {
-    const { user, logout, loading } = useContext(AuthContext);
+    const { user, loading } = useContext(AuthContext);
     const navigate = useNavigate();
     const [protectedMessage, setProtectedMessage] = useState('');
 
@@ -13,11 +15,6 @@ const Dashboard = () => {
             navigate('/login');
         }
     }, [user, loading, navigate]);
-
-    const handleLogout = async () => {
-        await logout();
-        navigate('/');
-    };
 
     const testProtectedEndpoint = async () => {
         try {
@@ -28,25 +25,35 @@ const Dashboard = () => {
         }
     };
 
-    if (loading) return <p>Loading...</p>;
+    if (loading) return <div style={{ textAlign: 'center', padding: '2rem' }}>Loading...</div>;
     if (!user) return null;
 
     return (
-        <div>
-            <h2>Dashboard</h2>
-            <p>Welcome back, {user.username}!</p>
+        <div style={{ maxWidth: '800px', margin: '0 auto' }}>
+            <h2 style={{ marginBottom: '1.5rem' }}>Dashboard</h2>
+            <Card className="card-glass" style={{ marginBottom: '2rem' }}>
+                <h3 style={{ marginTop: 0 }}>Welcome back, {user.username}!</h3>
+                <p style={{ color: 'var(--text-secondary)' }}>You are successfully logged in to NForge.</p>
+            </Card>
             
-            <div style={{ marginTop: '2rem', padding: '1rem', border: '1px solid #ccc' }}>
-                <h3>Protected Endpoint Test</h3>
-                <button onClick={testProtectedEndpoint}>Test Endpoint</button>
-                {protectedMessage && <p style={{ marginTop: '1rem' }}><strong>Result:</strong> {protectedMessage}</p>}
-            </div>
-
-            <div style={{ marginTop: '2rem' }}>
-                <button onClick={handleLogout} style={{ background: '#f44336', color: 'white', border: 'none', padding: '0.5rem 1rem', cursor: 'pointer' }}>
-                    Logout
-                </button>
-            </div>
+            <Card>
+                <h3 style={{ marginTop: 0 }}>Protected Endpoint Test</h3>
+                <p style={{ marginBottom: '1rem', color: 'var(--text-secondary)' }}>
+                    Test your authentication token against the backend API.
+                </p>
+                <Button onClick={testProtectedEndpoint}>Test Endpoint</Button>
+                {protectedMessage && (
+                    <div style={{ 
+                        marginTop: '1rem', 
+                        padding: '1rem', 
+                        background: 'var(--bg-tertiary)', 
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid var(--border-color)'
+                    }}>
+                        <strong style={{ color: 'var(--accent-primary)' }}>Result:</strong> {protectedMessage}
+                    </div>
+                )}
+            </Card>
         </div>
     );
 };
