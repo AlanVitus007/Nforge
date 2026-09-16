@@ -56,8 +56,15 @@ function PaperDetails() {
     if (error) return <div style={{ color: 'var(--danger)', padding: '2rem' }}>{error}</div>;
 
     return (
-        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-            <Link to={`/projects/${projectId}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.5rem', color: 'var(--text-secondary)' }}>
+        <div
+            style={{
+                width: "100%",
+                maxWidth: "1500px",
+                margin: "0 auto",
+                padding: "0 1.5rem",
+                boxSizing: "border-box",
+            }}
+        >            <Link to={`/projects/${projectId}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.5rem', color: 'var(--text-secondary)' }}>
                 ← Back to Project
             </Link>
 

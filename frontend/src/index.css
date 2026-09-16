@@ -1,16 +1,21 @@
 :root {
   /* Premium Blue-White Light Mode Palette */
-  --bg-primary: #f8faff;       /* near-white with a blue tint */
-  --bg-secondary: #eef2ff;     /* soft periwinkle */
-  --bg-tertiary: #dde5ff;      /* slightly deeper blue-grey */
+  --bg-primary: #f8faff;
+  /* near-white with a blue tint */
+  --bg-secondary: #eef2ff;
+  /* soft periwinkle */
+  --bg-tertiary: #dde5ff;
+  /* slightly deeper blue-grey */
 
   --text-primary: #0f172a;
   --text-secondary: #3b4f6b;
   --text-muted: #64748b;
 
-  --accent-primary: #2563eb;       /* vivid blue */
+  --accent-primary: #2563eb;
+  /* vivid blue */
   --accent-primary-hover: #1d4ed8;
-  --accent-secondary: #7c3aed;     /* violet complement */
+  --accent-secondary: #7c3aed;
+  /* violet complement */
 
   --border-color: rgba(37, 99, 235, 0.12);
   --border-hover: rgba(37, 99, 235, 0.28);
@@ -56,7 +61,7 @@
   --border-hover: rgba(255, 255, 255, 0.15);
 
   --bg-glass: rgba(26, 29, 36, 0.6);
-  
+
   --shadow-glow: 0 0 15px rgba(99, 102, 241, 0.3);
 }
 
@@ -160,7 +165,7 @@ a:hover {
 /* Base layouts */
 .container {
   width: 100%;
-  max-width: 1200px;
+  max-width: 1500px;
   margin: 0 auto;
   padding: 0 1.5rem;
 }

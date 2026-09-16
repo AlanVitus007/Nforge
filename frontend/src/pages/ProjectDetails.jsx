@@ -150,17 +150,24 @@ function ProjectDetails() {
     }
 
     return (
-        <div style={{ maxWidth: "1000px", margin: "0 auto" }}>
-            <Link
-                to="/projects"
-                style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "0.5rem",
-                    marginBottom: "1.5rem",
-                    color: "var(--text-secondary)",
-                }}
-            >
+        <div
+            style={{
+                width: "100%",
+                maxWidth: "1400px",
+                margin: "0 auto",
+                padding: "0 1.5rem",
+                boxSizing: "border-box",
+            }}
+        >            <Link
+            to="/projects"
+            style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "0.5rem",
+                marginBottom: "1.5rem",
+                color: "var(--text-secondary)",
+            }}
+        >
                 ← Back to Projects
             </Link>
 
@@ -183,11 +190,10 @@ function ProjectDetails() {
                     {project.description || "No description provided."}
                 </p>
             </div>
-
             <div
                 style={{
                     display: "grid",
-                    gridTemplateColumns: "1fr 2fr",
+                    gridTemplateColumns: "minmax(280px, 1fr) minmax(0, 2.5fr)",
                     gap: "2rem",
                 }}
             >
