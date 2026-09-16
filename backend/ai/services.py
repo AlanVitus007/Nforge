@@ -62,7 +62,7 @@ def generate_embedding(text):
 def create_paper_chunks(paper):
     """
     Split a paper's extracted text into chunks and save them
-    in the database.
+    with embeddings in the database.
     """
 
     if not paper.extracted_text:
@@ -76,10 +76,13 @@ def create_paper_chunks(paper):
     paper_chunks = []
 
     for index, chunk_text in enumerate(chunks):
+        embedding = generate_embedding(chunk_text)
+
         paper_chunk = PaperChunk.objects.create(
             paper=paper,
             chunk_index=index,
             text=chunk_text,
+            embedding=embedding,
         )
 
         paper_chunks.append(paper_chunk)
