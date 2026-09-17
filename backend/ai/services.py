@@ -1,3 +1,5 @@
+import numpy as np
+from ai.models import PaperChunk
 from .models import PaperChunk
 
 
@@ -88,3 +90,39 @@ def create_paper_chunks(paper):
         paper_chunks.append(paper_chunk)
 
     return paper_chunks
+
+
+
+def semantic_search(query, paper=None, top_k=5):
+    """
+    Find the most relevant paper chunks for a user query.
+    """
+
+    query_embedding = np.array(generate_embedding(query))
+
+    chunks = PaperChunk.objects.all()
+
+    if paper is not None:
+        chunks = chunks.filter(paper=paper)
+
+    results = []
+
+    for chunk in chunks:
+        if not chunk.embedding:
+            continue
+
+        chunk_embedding = np.array(chunk.embedding)
+
+        similarity = np.dot(query_embedding, chunk_embedding)
+
+        results.append({
+            "chunk": chunk,
+            "similarity": float(similarity),
+        })
+
+    results.sort(
+        key=lambda result: result["similarity"],
+        reverse=True,
+    )
+
+    return results[:top_k]

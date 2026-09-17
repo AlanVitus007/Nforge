@@ -7,6 +7,12 @@ from projects.models import Project
 from .models import Paper
 from .serializers import PaperSerializer
 
+from rest_framework.response import Response
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework import permissions
+
+from ai.services import semantic_search
+
 
 def get_project_for_user(project_id, user):
     """Return the Project only if it belongs to the requesting user."""
@@ -87,3 +93,40 @@ class PaperDetailView(generics.RetrieveDestroyAPIView):
             pk=self.kwargs["paper_id"],
             project=project,
         )
+
+        @api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def paper_semantic_search(request, project_id, paper_id):
+    query = request.query_params.get("q", "").strip()
+
+    if not query:
+        return Response(
+            {"error": "A search query is required."},
+            status=400,
+        )
+
+    paper = get_object_or_404(
+        Paper,
+        id=paper_id,
+        project_id=project_id,
+    )
+
+    results = semantic_search(
+        query,
+        paper=paper,
+        top_k=5,
+    )
+
+    response_data = []
+
+    for result in results:
+        response_data.append({
+            "text": result["chunk"].text,
+            "similarity": result["similarity"],
+            "chunk_index": result["chunk"].chunk_index,
+        })
+
+    return Response({
+        "query": query,
+        "results": response_data,
+    })
