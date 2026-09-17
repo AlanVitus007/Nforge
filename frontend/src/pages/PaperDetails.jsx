@@ -14,6 +14,11 @@ function PaperDetails() {
     const [paperToDelete, setPaperToDelete] = useState(null);
     const [isDeleting, setIsDeleting] = useState(false);
 
+    const [searchQuery, setSearchQuery] = useState("");
+    const [searchResults, setSearchResults] = useState([]);
+    const [searchLoading, setSearchLoading] = useState(false);
+    const [searchError, setSearchError] = useState("");
+
     useEffect(() => {
         const fetchPaper = async () => {
             try {
@@ -49,6 +54,39 @@ function PaperDetails() {
             setError("Failed to delete the paper. Please try again.");
         } finally {
             setIsDeleting(false);
+        }
+    };
+
+    const handleSemanticSearch = async (event) => {
+        event.preventDefault();
+
+        const query = searchQuery.trim();
+
+        if (!query) {
+            setSearchError("Please enter a question.");
+            return;
+        }
+
+        try {
+            setSearchLoading(true);
+            setSearchError("");
+            setSearchResults([]);
+
+            const response = await api.get(
+                `/projects/${projectId}/papers/${paperId}/search/`,
+                {
+                    params: {
+                        q: query,
+                    },
+                }
+            );
+
+            setSearchResults(response.data.results || []);
+        } catch (err) {
+            console.error("Semantic search failed:", err);
+            setSearchError("Failed to search this paper. Please try again.");
+        } finally {
+            setSearchLoading(false);
         }
     };
 
@@ -148,12 +186,131 @@ function PaperDetails() {
                         </Card>
 
                         <Card>
-                            <h3 style={{ margin: '0 0 1rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                <span style={{ fontSize: '1.25rem' }}>❓</span> Ask Questions
+                            <h3
+                                style={{
+                                    margin: "0 0 1rem 0",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "0.5rem",
+                                }}
+                            >
+                                <span style={{ fontSize: "1.25rem" }}>❓</span>
+                                Ask Questions
                             </h3>
-                            <div style={{ padding: '2rem', textAlign: 'center', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)', color: 'var(--text-muted)' }}>
-                                Coming soon
-                            </div>
+
+                            <form onSubmit={handleSemanticSearch}>
+                                <textarea
+                                    value={searchQuery}
+                                    onChange={(event) => setSearchQuery(event.target.value)}
+                                    placeholder="Ask something about this paper..."
+                                    rows={4}
+                                    style={{
+                                        width: "100%",
+                                        resize: "vertical",
+                                        padding: "0.8rem",
+                                        border: "1px solid var(--border-color)",
+                                        borderRadius: "var(--radius-md)",
+                                        background: "var(--bg-tertiary)",
+                                        color: "var(--text-primary)",
+                                        boxSizing: "border-box",
+                                        fontFamily: "inherit",
+                                    }}
+                                />
+
+                                <button
+                                    type="submit"
+                                    disabled={searchLoading}
+                                    style={{
+                                        marginTop: "0.8rem",
+                                        width: "100%",
+                                    }}
+                                >
+                                    {searchLoading ? "Searching..." : "Search Paper"}
+                                </button>
+                            </form>
+
+                            {searchError && (
+                                <p
+                                    style={{
+                                        color: "var(--danger)",
+                                        marginTop: "1rem",
+                                    }}
+                                >
+                                    {searchError}
+                                </p>
+                            )}
+
+                            {searchResults.length > 0 && (
+                                <div style={{ marginTop: "1.5rem" }}>
+                                    <h4 style={{ marginBottom: "1rem" }}>
+                                        Relevant Sections
+                                    </h4>
+
+                                    <div
+                                        style={{
+                                            display: "flex",
+                                            flexDirection: "column",
+                                            gap: "1rem",
+                                        }}
+                                    >
+                                        {searchResults.map((result, index) => (
+                                            <div
+                                                key={`${result.chunk_index}-${index}`}
+                                                style={{
+                                                    padding: "1rem",
+                                                    border: "1px solid var(--border-color)",
+                                                    borderRadius: "var(--radius-md)",
+                                                    background: "var(--bg-tertiary)",
+                                                }}
+                                            >
+                                                <div
+                                                    style={{
+                                                        display: "flex",
+                                                        justifyContent: "space-between",
+                                                        gap: "0.5rem",
+                                                        marginBottom: "0.6rem",
+                                                        fontSize: "0.8rem",
+                                                        color: "var(--text-secondary)",
+                                                    }}
+                                                >
+                                                    <span>
+                                                        Chunk {result.chunk_index}
+                                                    </span>
+
+                                                    <span>
+                                                        Similarity:{" "}
+                                                        {Number(result.similarity).toFixed(3)}
+                                                    </span>
+                                                </div>
+
+                                                <p
+                                                    style={{
+                                                        margin: 0,
+                                                        lineHeight: 1.6,
+                                                        whiteSpace: "pre-wrap",
+                                                    }}
+                                                >
+                                                    {result.text}
+                                                </p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {!searchLoading &&
+                                searchResults.length === 0 &&
+                                searchQuery &&
+                                !searchError && (
+                                    <p
+                                        style={{
+                                            marginTop: "1rem",
+                                            color: "var(--text-secondary)",
+                                        }}
+                                    >
+                                        No relevant sections found.
+                                    </p>
+                                )}
                         </Card>
 
                         <Card>

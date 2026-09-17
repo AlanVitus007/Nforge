@@ -94,7 +94,8 @@ class PaperDetailView(generics.RetrieveDestroyAPIView):
             project=project,
         )
 
-        @api_view(["GET"])
+
+@api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated])
 def paper_semantic_search(request, project_id, paper_id):
     query = request.query_params.get("q", "").strip()
@@ -105,10 +106,15 @@ def paper_semantic_search(request, project_id, paper_id):
             status=400,
         )
 
+    project = get_project_for_user(
+        project_id,
+        request.user,
+    )
+
     paper = get_object_or_404(
         Paper,
-        id=paper_id,
-        project_id=project_id,
+        pk=paper_id,
+        project=project,
     )
 
     results = semantic_search(

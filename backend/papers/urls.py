@@ -1,7 +1,9 @@
 from django.urls import path
-from .views import PaperListCreateView, PaperDetailView
-
-from .views import paper_semantic_search
+from .views import (
+    PaperListCreateView,
+    PaperDetailView,
+    paper_semantic_search,
+)
 
 urlpatterns = [
     path('', PaperListCreateView.as_view(), name='paper-list-create'),
