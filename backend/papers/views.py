@@ -1,26 +1,62 @@
 import fitz
+import unicodedata
 
 from django.shortcuts import get_object_or_404
+
 from rest_framework import generics, permissions
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.response import Response
 
 from projects.models import Project
 from .models import Paper
 from .serializers import PaperSerializer
 
-from rest_framework.response import Response
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework import permissions
-
 from ai.services import semantic_search
 
 
 def get_project_for_user(project_id, user):
-    """Return the Project only if it belongs to the requesting user."""
+    """
+    Return the project only if it belongs to the requesting user.
+    """
     return get_object_or_404(
         Project,
         pk=project_id,
         owner=user,
     )
+
+
+def clean_extracted_text(text):
+    """
+    Remove unwanted characters extracted from PDF files.
+    Preserve normal text, spaces, newlines, and tabs.
+    """
+
+    cleaned = []
+
+    for char in text:
+        category = unicodedata.category(char)
+
+        # Remove common square/replacement characters
+        if char in {
+            "□",
+            "�",
+            "\uf0a7",
+            "\uf0b7",
+            "\uf0d8",
+        }:
+            continue
+
+        # Remove private-use, surrogate, and formatting characters
+        if category in {"Co", "Cs", "Cf"}:
+            continue
+
+        # Remove control characters except newline and tab
+        if category == "Cc" and char not in {"\n", "\t"}:
+            continue
+
+        cleaned.append(char)
+
+    return "".join(cleaned)
 
 
 class PaperListCreateView(generics.ListCreateAPIView):
@@ -48,7 +84,6 @@ class PaperListCreateView(generics.ListCreateAPIView):
             self.request.user,
         )
 
-        # Important: assign the project while saving the paper
         paper = serializer.save(project=project)
 
         try:
@@ -61,10 +96,13 @@ class PaperListCreateView(generics.ListCreateAPIView):
 
             document.close()
 
+            # Clean unwanted characters from extracted PDF text
+            extracted_text = clean_extracted_text(extracted_text)
+
             paper.extracted_text = extracted_text
             paper.save(update_fields=["extracted_text"])
 
-            # Import here to avoid loading the AI model during login/server startup
+            # Generate chunks and embeddings
             from ai.services import create_paper_chunks
 
             create_paper_chunks(paper)
@@ -98,11 +136,17 @@ class PaperDetailView(generics.RetrieveDestroyAPIView):
 @api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated])
 def paper_semantic_search(request, project_id, paper_id):
+    """
+    Search for relevant sections inside a specific paper.
+    """
+
     query = request.query_params.get("q", "").strip()
 
     if not query:
         return Response(
-            {"error": "A search query is required."},
+            {
+                "error": "A search query is required."
+            },
             status=400,
         )
 
@@ -120,19 +164,23 @@ def paper_semantic_search(request, project_id, paper_id):
     results = semantic_search(
         query,
         paper=paper,
-        top_k=5,
+        top_k=3,
     )
 
     response_data = []
 
     for result in results:
-        response_data.append({
-            "text": result["chunk"].text,
-            "similarity": result["similarity"],
-            "chunk_index": result["chunk"].chunk_index,
-        })
+        response_data.append(
+            {
+                "text": result["chunk"].text,
+                "similarity": result["similarity"],
+                "chunk_index": result["chunk"].chunk_index,
+            }
+        )
 
-    return Response({
-        "query": query,
-        "results": response_data,
-    })
+    return Response(
+        {
+            "query": query,
+            "results": response_data,
+        }
+    )

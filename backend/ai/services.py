@@ -1,7 +1,6 @@
 import numpy as np
-from ai.models import PaperChunk
-from .models import PaperChunk
 
+from .models import PaperChunk
 
 
 def split_text(text, chunk_size=1000, overlap=200):
@@ -50,12 +49,13 @@ def get_embedding_model():
 
     return _model
 
+
 def generate_embedding(text):
     model = get_embedding_model()
 
     embedding = model.encode(
         text,
-        normalize_embeddings=True
+        normalize_embeddings=True,
     )
 
     return embedding.tolist()
@@ -66,7 +66,6 @@ def create_paper_chunks(paper):
     Split a paper's extracted text into chunks and save them
     with embeddings in the database.
     """
-
     if not paper.extracted_text:
         return []
 
@@ -92,12 +91,10 @@ def create_paper_chunks(paper):
     return paper_chunks
 
 
-
 def semantic_search(query, paper=None, top_k=5):
     """
     Find the most relevant paper chunks for a user query.
     """
-
     query_embedding = np.array(generate_embedding(query))
 
     chunks = PaperChunk.objects.all()

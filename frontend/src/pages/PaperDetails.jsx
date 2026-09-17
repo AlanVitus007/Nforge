@@ -265,22 +265,12 @@ function PaperDetails() {
                                             >
                                                 <div
                                                     style={{
-                                                        display: "flex",
-                                                        justifyContent: "space-between",
-                                                        gap: "0.5rem",
                                                         marginBottom: "0.6rem",
                                                         fontSize: "0.8rem",
                                                         color: "var(--text-secondary)",
                                                     }}
                                                 >
-                                                    <span>
-                                                        Chunk {result.chunk_index}
-                                                    </span>
-
-                                                    <span>
-                                                        Similarity:{" "}
-                                                        {Number(result.similarity).toFixed(3)}
-                                                    </span>
+                                                    Relevant section
                                                 </div>
 
                                                 <p
@@ -290,8 +280,9 @@ function PaperDetails() {
                                                         whiteSpace: "pre-wrap",
                                                     }}
                                                 >
-                                                    {result.text}
-                                                </p>
+                                                    {result.text.length > 500
+                                                        ? `${result.text.slice(0, 500)}...`
+                                                        : result.text}                                                </p>
                                             </div>
                                         ))}
                                     </div>
