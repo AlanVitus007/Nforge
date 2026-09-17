@@ -3,15 +3,20 @@ import unicodedata
 
 from django.shortcuts import get_object_or_404
 
-from rest_framework import generics, permissions
+from rest_framework import generics, permissions, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
 from projects.models import Project
+
 from .models import Paper
 from .serializers import PaperSerializer
 
-from ai.services import semantic_search
+from ai.services import (
+    semantic_search,
+    generate_ai_answer,
+    create_paper_chunks,
+)
 
 
 def get_project_for_user(project_id, user):
@@ -30,7 +35,6 @@ def clean_extracted_text(text):
     Remove unwanted characters extracted from PDF files.
     Preserve normal text, spaces, newlines, and tabs.
     """
-
     cleaned = []
 
     for char in text:
@@ -103,8 +107,6 @@ class PaperListCreateView(generics.ListCreateAPIView):
             paper.save(update_fields=["extracted_text"])
 
             # Generate chunks and embeddings
-            from ai.services import create_paper_chunks
-
             create_paper_chunks(paper)
 
         except Exception as error:
@@ -136,51 +138,46 @@ class PaperDetailView(generics.RetrieveDestroyAPIView):
 @api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated])
 def paper_semantic_search(request, project_id, paper_id):
-    """
-    Search for relevant sections inside a specific paper.
-    """
-
-    query = request.query_params.get("q", "").strip()
+    query = request.GET.get("q", "").strip()
 
     if not query:
         return Response(
-            {
-                "error": "A search query is required."
-            },
-            status=400,
+            {"detail": "A search query is required."},
+            status=status.HTTP_400_BAD_REQUEST,
         )
-
-    project = get_project_for_user(
-        project_id,
-        request.user,
-    )
 
     paper = get_object_or_404(
         Paper,
         pk=paper_id,
-        project=project,
+        project_id=project_id,
+        project__owner=request.user,
     )
 
-    results = semantic_search(
+    search_results = semantic_search(
         query,
         paper=paper,
-        top_k=3,
+        top_k=5,
     )
 
-    response_data = []
+    try:
+        answer = generate_ai_answer(
+            query,
+            search_results,
+        )
 
-    for result in results:
-        response_data.append(
+    except Exception as error:
+        return Response(
             {
-                "text": result["chunk"].text,
-                "similarity": result["similarity"],
-                "chunk_index": result["chunk"].chunk_index,
-            }
+                "detail": "AI answer generation failed.",
+                "error": str(error),
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
     return Response(
         {
             "query": query,
-            "results": response_data,
-        }
+            "answer": answer,
+        },
+        status=status.HTTP_200_OK,
     )

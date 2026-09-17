@@ -1,5 +1,7 @@
 import numpy as np
+import os
 
+from google import genai
 from .models import PaperChunk
 
 
@@ -123,3 +125,53 @@ def semantic_search(query, paper=None, top_k=5):
     )
 
     return results[:top_k]
+
+
+
+
+def generate_ai_answer(question, search_results):
+    """
+    Generate a natural-language answer using relevant paper chunks.
+    """
+
+    if not search_results:
+        return "I could not find relevant information in this paper."
+
+    context = "\n\n".join(
+        f"Source section {index + 1}:\n{result['chunk'].text}"
+        for index, result in enumerate(search_results)
+    )
+
+    prompt = f"""
+You are an academic research assistant.
+
+Answer the user's question using only the provided paper sections.
+
+Rules:
+- Do not invent information.
+- Do not use outside knowledge.
+- If the paper does not contain enough information, say so.
+- Give a clear, concise, natural-language answer.
+- Do not mention similarity scores.
+- Do not refer to the text as chunks.
+
+User question:
+{question}
+
+Relevant paper sections:
+{context}
+"""
+
+    api_key = os.getenv("GEMINI_API_KEY")
+
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY is not configured.")
+
+    client = genai.Client(api_key=api_key)
+
+    response = client.models.generate_content(
+        model="gemini-3.5-flash",
+        contents=prompt,
+    )
+
+    return response.text
