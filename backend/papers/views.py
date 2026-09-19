@@ -1,4 +1,4 @@
-import fitz
+import pymupdf as fitz
 import unicodedata
 
 from django.shortcuts import get_object_or_404

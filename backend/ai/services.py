@@ -44,8 +44,8 @@ def split_text_with_pages(page_texts, chunk_size=1000, overlap=200):
     Split a list of (page_number, text) tuples into overlapping chunks while
     preserving the source page number.
 
-    Each chunk is attributed to the page where it *starts*. If a fixed-size
-    window crosses a page boundary the attribution stays with the starting page,
+    Each chunk is attributed to the page where its actual non-whitespace text starts.
+    If a fixed-size window crosses a page boundary the attribution stays with the starting page,
     which is the most accurate single-page reference available without
     introducing heuristics.
 
@@ -79,12 +79,19 @@ def split_text_with_pages(page_texts, chunk_size=1000, overlap=200):
 
     while start < len(flat_text):
         end = start + chunk_size
-        chunk = flat_text[start:end].strip()
+        chunk_slice = flat_text[start:end]
+        chunk_text = chunk_slice.strip()
 
-        if chunk:
-            # The chunk's page is determined by where it starts in the stream
-            page_number = char_pages[start]
-            chunks.append((chunk, page_number))
+        if chunk_text:
+            # Find the actual start index of non-whitespace content within flat_text
+            lstrip_len = len(chunk_slice) - len(chunk_slice.lstrip())
+            actual_start = start + lstrip_len
+            if actual_start < len(char_pages):
+                page_number = char_pages[actual_start]
+            else:
+                page_number = char_pages[start]
+
+            chunks.append((chunk_text, page_number))
 
         if end >= len(flat_text):
             break
@@ -130,18 +137,27 @@ def create_paper_chunks(paper, page_texts=None):
     page_texts : list of (int, str) | None
         A list of (page_number, page_text) tuples produced by the PDF extractor.
         When provided the chunks are created page-aware.
-        When None the function falls back to the original flat-text approach so
-        that existing callers do not break (page_number will be null for those
-        chunks).
+        When None, the function attempts to extract page_texts directly from paper.file.
     """
     # Remove existing chunks so this function can safely be called again.
     paper.chunks.all().delete()
+
+    if page_texts is None and paper.file:
+        try:
+            from papers.views import extract_page_texts
+            page_texts, full_text = extract_page_texts(paper.file.path)
+            if full_text and not paper.extracted_text:
+                paper.extracted_text = full_text
+                paper.save(update_fields=["extracted_text"])
+        except Exception as err:
+            print(f"Failed to extract page_texts from PDF file: {err}")
+            page_texts = None
 
     if page_texts is not None:
         # Page-aware path (new uploads and reprocessed papers)
         chunk_tuples = split_text_with_pages(page_texts)
     else:
-        # Legacy fallback: use the stored extracted_text without page info
+        # Fallback: use stored extracted_text without page info
         if not paper.extracted_text:
             return []
         raw_chunks = split_text(paper.extracted_text)
@@ -265,7 +281,7 @@ Paper sources:
     client = genai.Client(api_key=api_key)
 
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.6-flash",
         contents=prompt,
     )
 
