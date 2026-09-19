@@ -63,6 +63,31 @@ def clean_extracted_text(text):
     return "".join(cleaned)
 
 
+def extract_page_texts(pdf_path):
+    """
+    Open a PDF and return:
+      - page_texts: list of (page_number, cleaned_text) tuples (1-based page numbers)
+      - full_text:  all pages concatenated (for Paper.extracted_text storage)
+    """
+    document = fitz.open(pdf_path)
+
+    page_texts = []
+    full_text_parts = []
+
+    for page_index, page in enumerate(document):
+        raw_text = page.get_text()
+        cleaned = clean_extracted_text(raw_text)
+
+        page_number = page_index + 1  # 1-based for users
+        page_texts.append((page_number, cleaned))
+        full_text_parts.append(cleaned)
+
+    document.close()
+
+    full_text = "\n".join(full_text_parts)
+    return page_texts, full_text
+
+
 class PaperListCreateView(generics.ListCreateAPIView):
     """
     GET  /api/projects/<project_id>/papers/
@@ -91,23 +116,13 @@ class PaperListCreateView(generics.ListCreateAPIView):
         paper = serializer.save(project=project)
 
         try:
-            document = fitz.open(paper.file.path)
+            page_texts, full_text = extract_page_texts(paper.file.path)
 
-            extracted_text = ""
-
-            for page in document:
-                extracted_text += page.get_text()
-
-            document.close()
-
-            # Clean unwanted characters from extracted PDF text
-            extracted_text = clean_extracted_text(extracted_text)
-
-            paper.extracted_text = extracted_text
+            paper.extracted_text = full_text
             paper.save(update_fields=["extracted_text"])
 
-            # Generate chunks and embeddings
-            create_paper_chunks(paper)
+            # Generate page-aware chunks and embeddings
+            create_paper_chunks(paper, page_texts=page_texts)
 
         except Exception as error:
             print(f"PDF processing failed: {error}")
@@ -132,6 +147,57 @@ class PaperDetailView(generics.RetrieveDestroyAPIView):
             Paper,
             pk=self.kwargs["paper_id"],
             project=project,
+        )
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def reprocess_paper(request, project_id, paper_id):
+    """
+    POST /api/projects/<project_id>/papers/<paper_id>/reprocess/
+
+    Regenerates PaperChunk records from the stored PDF file so that existing
+    papers gain page_number metadata without requiring a re-upload.
+
+    The PDF file itself is not modified or deleted.
+    """
+    paper = get_object_or_404(
+        Paper,
+        pk=paper_id,
+        project_id=project_id,
+        project__owner=request.user,
+    )
+
+    if not paper.file:
+        return Response(
+            {"error": "This paper has no associated PDF file."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        page_texts, full_text = extract_page_texts(paper.file.path)
+
+        # Update the stored full text as well (no-op if unchanged)
+        paper.extracted_text = full_text
+        paper.save(update_fields=["extracted_text"])
+
+        chunks = create_paper_chunks(paper, page_texts=page_texts)
+
+        return Response(
+            {
+                "status": "ok",
+                "chunks_created": len(chunks),
+                "pages_processed": len(page_texts),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    except Exception as error:
+        return Response(
+            {
+                "error": f"Reprocessing failed: {error}",
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
 

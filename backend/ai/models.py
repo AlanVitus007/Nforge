@@ -9,6 +9,7 @@ class PaperChunk(models.Model):
         related_name="chunks",
     )
     chunk_index = models.PositiveIntegerField()
+    page_number = models.PositiveIntegerField(null=True, blank=True)
     text = models.TextField()
     embedding = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

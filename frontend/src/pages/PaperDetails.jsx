@@ -1,5 +1,4 @@
-
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import api from "../services/api";
 import Card from "../components/Card";
@@ -18,8 +17,14 @@ function PaperDetails() {
 
     const [searchQuery, setSearchQuery] = useState("");
     const [searchAnswer, setSearchAnswer] = useState("");
+    const [searchSources, setSearchSources] = useState([]);
     const [searchLoading, setSearchLoading] = useState(false);
     const [searchError, setSearchError] = useState("");
+
+    // Base PDF URL without any page fragment — set once when the paper loads
+    const pdfBaseUrl = useRef("");
+    // The src currently shown in the iframe (may include #page=N)
+    const [iframeSrc, setIframeSrc] = useState("");
 
     useEffect(() => {
         const fetchPaper = async () => {
@@ -31,7 +36,15 @@ function PaperDetails() {
                     `/projects/${projectId}/papers/${paperId}/`
                 );
 
-                setPaper(response.data);
+                const data = response.data;
+                setPaper(data);
+
+                // Build the base PDF URL (strip any server origin for same-host serving)
+                if (data.file) {
+                    const base = data.file.replace("http://localhost:8000", "");
+                    pdfBaseUrl.current = base;
+                    setIframeSrc(base);
+                }
             } catch (err) {
                 console.error("Failed to load paper:", err);
                 setError("Failed to load paper.");
@@ -42,6 +55,20 @@ function PaperDetails() {
 
         fetchPaper();
     }, [projectId, paperId]);
+
+    /**
+     * Navigate the PDF iframe to a specific page using the #page=N fragment.
+     * Most Chromium-based browsers support this for embedded PDFs.
+     * If the browser ignores the fragment the viewer simply stays put — no crash.
+     */
+    const navigateToPdfPage = (pageNumber) => {
+        if (!pdfBaseUrl.current || !pageNumber) return;
+        // Force a reload with the new fragment by blanking first
+        setIframeSrc("");
+        requestAnimationFrame(() => {
+            setIframeSrc(`${pdfBaseUrl.current}#page=${pageNumber}`);
+        });
+    };
 
     const handleDeletePaper = async () => {
         if (!paperToDelete) return;
@@ -73,6 +100,7 @@ function PaperDetails() {
         if (!query) {
             setSearchError("Please enter a question.");
             setSearchAnswer("");
+            setSearchSources([]);
             return;
         }
 
@@ -80,24 +108,34 @@ function PaperDetails() {
             setSearchLoading(true);
             setSearchError("");
             setSearchAnswer("");
+            setSearchSources([]);
 
-            const response = await api.get(
-                `/projects/${projectId}/papers/${paperId}/search/`,
-                {
-                    params: {
-                        q: query,
-                    },
-                }
-            );
+            /*
+             * The AI backend uses POST:
+             *
+             * {
+             *     paper_id: paperId,
+             *     question: query
+             * }
+             */
+            const response = await api.post("/ai/ask/", {
+                paper_id: paperId,
+                question: query,
+            });
+
+            console.log("AI response:", response.data);
 
             setSearchAnswer(
                 response.data.answer ||
                 "I could not find an answer in this paper."
             );
+
+            setSearchSources(response.data.sources || []);
         } catch (err) {
             console.error("AI search failed:", err);
 
             const errorMessage =
+                err.response?.data?.error ||
                 err.response?.data?.detail ||
                 "Failed to get an answer from this paper. Please try again.";
 
@@ -196,6 +234,7 @@ function PaperDetails() {
                     alignItems: "start",
                 }}
             >
+                {/* PDF */}
                 <section>
                     {paper.file ? (
                         <Card
@@ -223,10 +262,7 @@ function PaperDetails() {
                             </div>
 
                             <iframe
-                                src={paper.file.replace(
-                                    "http://localhost:8000",
-                                    ""
-                                )}
+                                src={iframeSrc}
                                 title={paper.title}
                                 width="100%"
                                 height="800px"
@@ -250,6 +286,7 @@ function PaperDetails() {
                     )}
                 </section>
 
+                {/* AI WORKSPACE */}
                 <section>
                     <div
                         style={{
@@ -291,6 +328,7 @@ function PaperDetails() {
                             </p>
                         </Card>
 
+                        {/* SUMMARY */}
                         <Card>
                             <h3
                                 style={{
@@ -319,6 +357,7 @@ function PaperDetails() {
                             </div>
                         </Card>
 
+                        {/* ASK QUESTIONS */}
                         <Card>
                             <h3
                                 style={{
@@ -346,7 +385,8 @@ function PaperDetails() {
                                         width: "100%",
                                         resize: "vertical",
                                         padding: "0.8rem",
-                                        border: "1px solid var(--border-color)",
+                                        border:
+                                            "1px solid var(--border-color)",
                                         borderRadius: "var(--radius-md)",
                                         background: "var(--bg-tertiary)",
                                         color: "var(--text-primary)",
@@ -369,6 +409,7 @@ function PaperDetails() {
                                 </button>
                             </form>
 
+                            {/* ERROR */}
                             {searchError && (
                                 <p
                                     style={{
@@ -380,6 +421,7 @@ function PaperDetails() {
                                 </p>
                             )}
 
+                            {/* LOADING */}
                             {searchLoading && (
                                 <p
                                     style={{
@@ -387,16 +429,19 @@ function PaperDetails() {
                                         color: "var(--text-secondary)",
                                     }}
                                 >
-                                    Reading the paper and generating an answer...
+                                    Reading the paper and generating an
+                                    answer...
                                 </p>
                             )}
 
+                            {/* ANSWER */}
                             {searchAnswer && !searchLoading && (
                                 <div
                                     style={{
                                         marginTop: "1.5rem",
                                         padding: "1.25rem",
-                                        border: "1px solid var(--border-color)",
+                                        border:
+                                            "1px solid var(--border-color)",
                                         borderRadius: "var(--radius-md)",
                                         background: "var(--bg-tertiary)",
                                     }}
@@ -418,10 +463,133 @@ function PaperDetails() {
                                     >
                                         {searchAnswer}
                                     </p>
+
+                                    {/* SOURCES */}
+                                    {searchSources.length > 0 && (
+                                        <div
+                                            style={{
+                                                marginTop: "1.5rem",
+                                                paddingTop: "1rem",
+                                                borderTop:
+                                                    "1px solid var(--border-color)",
+                                            }}
+                                        >
+                                            <h4
+                                                style={{
+                                                    margin:
+                                                        "0 0 1rem 0",
+                                                }}
+                                            >
+                                                Sources from the paper
+                                            </h4>
+
+                                            <div
+                                                style={{
+                                                    display: "flex",
+                                                    flexDirection: "column",
+                                                    gap: "1rem",
+                                                }}
+                                            >
+                                                {(searchSources ?? []).map(
+                                                    (source) => (
+                                                        <div
+                                                            key={
+                                                                source.chunk_id
+                                                            }
+                                                            style={{
+                                                                padding:
+                                                                    "1rem",
+                                                                border:
+                                                                    "1px solid var(--border-color)",
+                                                                borderRadius:
+                                                                    "var(--radius-md)",
+                                                                background:
+                                                                    "var(--bg-secondary)",
+                                                            }}
+                                                        >
+                                                            {/* Source header: "Source N · Page X" */}
+                                                            <div
+                                                                style={{
+                                                                    display: "flex",
+                                                                    alignItems: "center",
+                                                                    gap: "0.5rem",
+                                                                    marginBottom: "0.5rem",
+                                                                    flexWrap: "wrap",
+                                                                }}
+                                                            >
+                                                                <strong>
+                                                                    Source{" "}
+                                                                    {source.source_number}
+                                                                </strong>
+
+                                                                {source.page_number != null ? (
+                                                                    <>
+                                                                        <span
+                                                                            style={{
+                                                                                color: "var(--text-muted)",
+                                                                                userSelect: "none",
+                                                                            }}
+                                                                        >
+                                                                            ·
+                                                                        </span>
+                                                                        <button
+                                                                            title={`Jump to page ${source.page_number} in the PDF viewer`}
+                                                                            onClick={() =>
+                                                                                navigateToPdfPage(
+                                                                                    source.page_number
+                                                                                )
+                                                                            }
+                                                                            style={{
+                                                                                background: "none",
+                                                                                border: "none",
+                                                                                padding: 0,
+                                                                                cursor: "pointer",
+                                                                                color: "var(--accent-primary)",
+                                                                                fontWeight: 600,
+                                                                                fontSize: "inherit",
+                                                                                fontFamily: "inherit",
+                                                                                textDecoration: "underline",
+                                                                                textUnderlineOffset: "2px",
+                                                                            }}
+                                                                        >
+                                                                            Page{" "}
+                                                                            {source.page_number}
+                                                                        </button>
+                                                                    </>
+                                                                ) : (
+                                                                    <span
+                                                                        style={{
+                                                                            color: "var(--text-muted)",
+                                                                            fontSize: "0.85em",
+                                                                        }}
+                                                                    >
+                                                                        · Page information unavailable
+                                                                    </span>
+                                                                )}
+                                                            </div>
+
+                                                            <p
+                                                                style={{
+                                                                    margin: 0,
+                                                                    lineHeight:
+                                                                        1.6,
+                                                                    color:
+                                                                        "var(--text-secondary)",
+                                                                }}
+                                                            >
+                                                                {source.text}
+                                                            </p>
+                                                        </div>
+                                                    )
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </Card>
 
+                        {/* RESEARCH GAPS */}
                         <Card>
                             <h3
                                 style={{
@@ -453,6 +621,7 @@ function PaperDetails() {
                 </section>
             </div>
 
+            {/* DELETE MODAL */}
             {showDeletePopup && (
                 <div className="modal-overlay">
                     <div
