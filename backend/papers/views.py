@@ -63,29 +63,71 @@ def clean_extracted_text(text):
     return "".join(cleaned)
 
 
+import re
+
+
+def clean_block_text(text):
+    """
+    Clean text within a block:
+    - remove unwanted control/private characters using clean_extracted_text()
+    - join hyphenated word breaks at line ends (e.g. 'oper-\\nating' -> 'operating')
+    - convert single newlines inside paragraph to space
+    - return list of clean paragraph strings
+    """
+    raw_clean = clean_extracted_text(text)
+    if not raw_clean or not raw_clean.strip():
+        return []
+
+    # Split block into paragraphs by double newlines if present
+    raw_paras = [p for p in re.split(r'\n\s*\n', raw_clean) if p.strip()]
+    cleaned_paras = []
+
+    for para in raw_paras:
+        # Join hyphenated words across line wraps
+        para = re.sub(r'(\b\w+)-\s*\n\s*(\w+\b)', r'\1\2', para)
+        # Convert single newlines inside paragraph to space
+        para = re.sub(r'(?<!\n)\n(?!\n)', ' ', para)
+        # Normalize multiple spaces
+        para = re.sub(r'[ \t]+', ' ', para).strip()
+        if para:
+            cleaned_paras.append(para)
+
+    return cleaned_paras
+
+
 def extract_page_texts(pdf_path):
     """
     Open a PDF and return:
-      - page_texts: list of (page_number, cleaned_text) tuples (1-based page numbers)
+      - page_structures: list of (page_number, list_of_paragraphs) tuples (1-based page numbers)
       - full_text:  all pages concatenated (for Paper.extracted_text storage)
     """
     document = fitz.open(pdf_path)
 
-    page_texts = []
+    page_structures = []
     full_text_parts = []
 
     for page_index, page in enumerate(document):
-        raw_text = page.get_text()
-        cleaned = clean_extracted_text(raw_text)
-
         page_number = page_index + 1  # 1-based for users
-        page_texts.append((page_number, cleaned))
-        full_text_parts.append(cleaned)
+        # get_text("blocks", sort=True) extracts layout blocks in reading order
+        blocks = page.get_text("blocks", sort=True)
+        page_paras = []
+
+        for b in blocks:
+            # b: (x0, y0, x1, y1, text, block_no, block_type)
+            # block_type == 0 is text
+            if len(b) >= 7 and b[6] == 0:
+                block_text = b[4]
+                paras = clean_block_text(block_text)
+                page_paras.extend(paras)
+
+        page_structures.append((page_number, page_paras))
+        if page_paras:
+            full_text_parts.append("\n\n".join(page_paras))
 
     document.close()
 
-    full_text = "\n".join(full_text_parts)
-    return page_texts, full_text
+    full_text = "\n\n".join(full_text_parts)
+    return page_structures, full_text
 
 
 class PaperListCreateView(generics.ListCreateAPIView):
