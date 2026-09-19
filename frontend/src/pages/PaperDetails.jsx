@@ -113,25 +113,25 @@ function PaperDetails() {
     };
 
 
-const getApiErrorMessage = (err, defaultMsg = "Something went wrong while processing the request.") => {
-    if (err.response) {
-        const status = err.response.status;
-        if (status === 429) {
-            return "Gemini API rate limit exceeded. Please try again later.";
+    const getApiErrorMessage = (err, defaultMsg = "Something went wrong while processing the request.") => {
+        if (err.response) {
+            const status = err.response.status;
+            if (status === 429) {
+                return "Gemini API rate limit exceeded. Please try again later.";
+            }
+            if (status === 503) {
+                return "Gemini is temporarily unavailable. Please try again shortly.";
+            }
+            if (status === 401) {
+                return "Authentication failed.";
+            }
+            if (status === 404) {
+                return "Paper not found.";
+            }
+            return err.response.data?.error || err.response.data?.detail || defaultMsg;
         }
-        if (status === 503) {
-            return "Gemini is temporarily unavailable. Please try again shortly.";
-        }
-        if (status === 401) {
-            return "Authentication failed.";
-        }
-        if (status === 404) {
-            return "Paper not found.";
-        }
-        return err.response.data?.error || err.response.data?.detail || defaultMsg;
-    }
-    return defaultMsg;
-};
+        return defaultMsg;
+    };
 
     const handleGenerateSummary = async () => {
         if (summaryLoading) return; // prevent double-click

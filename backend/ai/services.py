@@ -513,7 +513,8 @@ def _call_gemini(client, prompt, *, json_mode=False, feature_name="ai"):
             print(f"[DIAGNOSTICS] Feature: {feature_name} | Request #{attempt + 1} | Status: ERROR ({type(err).__name__}) | Duration: {duration:.2f}s")
             raise
 
-    raise last_err
+    if last_err:
+        raise last_err
 
 
 
