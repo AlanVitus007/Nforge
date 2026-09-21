@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import api from "../services/api";
 import Card from "../components/Card";
 import Button from "../components/Button";
@@ -7,6 +7,8 @@ import Button from "../components/Button";
 function PaperDetails() {
     const { projectId, paperId } = useParams();
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+    const pageParam = searchParams.get("page");
 
     const [paper, setPaper] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -58,7 +60,11 @@ function PaperDetails() {
                 if (data.file) {
                     const base = data.file.replace("http://localhost:8000", "");
                     pdfBaseUrl.current = base;
-                    setIframeSrc(base);
+                    if (pageParam) {
+                        setIframeSrc(`${base}#page=${pageParam}`);
+                    } else {
+                        setIframeSrc(base);
+                    }
                 }
             } catch (err) {
                 console.error("Failed to load paper:", err);
@@ -70,6 +76,12 @@ function PaperDetails() {
 
         fetchPaper();
     }, [projectId, paperId]);
+
+    useEffect(() => {
+        if (pdfBaseUrl.current && pageParam) {
+            navigateToPdfPage(pageParam);
+        }
+    }, [pageParam]);
 
     /**
      * Navigate the PDF iframe to a specific page using the #page=N fragment.

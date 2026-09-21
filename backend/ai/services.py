@@ -357,6 +357,89 @@ def semantic_search(query, paper=None, top_k=5):
     return results[:top_k]
 
 
+def retrieve_multi_paper_evidence(question, papers, top_k_per_paper=5):
+    """
+    Retrieve relevant evidence chunks grouped by paper across multiple papers.
+    Uses local SentenceTransformer embeddings and cosine similarity (0 Gemini calls).
+
+    Parameters
+    ----------
+    question : str
+        The query/question string. Must be non-empty.
+    papers : list | QuerySet
+        A list of Paper model instances (1 to 4 papers).
+    top_k_per_paper : int, optional
+        Maximum number of top evidence chunks to return per paper (default 5, max 8).
+
+    Returns
+    -------
+    list of dict
+        Grouped evidence structures per paper containing paper metadata and sorted source chunks.
+    """
+    from papers.models import Paper
+
+    if not question or not isinstance(question, str) or not question.strip():
+        raise ValueError("question must be a non-empty string.")
+
+    if not papers:
+        raise ValueError("papers must be a non-empty list of Paper instances.")
+
+    papers_list = list(papers)
+
+    if len(papers_list) > 4:
+        raise ValueError("Maximum 4 papers supported for multi-paper evidence retrieval.")
+
+    for p in papers_list:
+        if not isinstance(p, Paper):
+            raise ValueError("Each item in papers must be a valid Paper instance.")
+
+    if not isinstance(top_k_per_paper, int) or top_k_per_paper < 1 or top_k_per_paper > 8:
+        raise ValueError("top_k_per_paper must be an integer between 1 and 8.")
+
+    # Generate query embedding ONCE for performance
+    query_embedding = np.array(generate_embedding(question.strip()))
+
+    grouped_results = []
+
+    # Scoped query: fetch chunks only for the requested papers
+    all_chunks = PaperChunk.objects.filter(paper__in=papers_list)
+
+    # Group chunks by paper ID in memory to minimize DB hits
+    chunks_by_paper = {}
+    for chunk in all_chunks:
+        chunks_by_paper.setdefault(chunk.paper_id, []).append(chunk)
+
+    for paper in papers_list:
+        paper_chunks = chunks_by_paper.get(paper.id, [])
+        scored_sources = []
+
+        for chunk in paper_chunks:
+            if not chunk.embedding:
+                continue
+
+            chunk_embedding = np.array(chunk.embedding)
+            similarity = float(np.dot(query_embedding, chunk_embedding))
+
+            scored_sources.append({
+                "chunk_id": chunk.id,
+                "chunk_index": chunk.chunk_index,
+                "page_number": chunk.page_number,
+                "text": chunk.text,
+                "similarity": similarity,
+            })
+
+        # Sort sources within each paper by similarity descending
+        scored_sources.sort(key=lambda s: s["similarity"], reverse=True)
+
+        grouped_results.append({
+            "paper_id": paper.id,
+            "paper_title": paper.title,
+            "sources": scored_sources[:top_k_per_paper],
+        })
+
+    return grouped_results
+
+
 def generate_ai_answer(question, search_results):
     """
     Generate an AI answer using only the retrieved paper chunks.
@@ -804,3 +887,264 @@ Output MUST be a valid JSON object with this exact structure:
         "gaps_data": gaps_json,
         "sources": sources,
     }
+
+
+def parse_multi_paper_synthesis_json(text):
+    """
+    Parse JSON from Gemini multi-paper synthesis response text.
+    Handles Markdown code fences (```json) safely.
+    """
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned)
+        cleaned = re.sub(r'\s*```$', '', cleaned)
+
+    try:
+        data = json.loads(cleaned)
+    except Exception as err:
+        print(f"Failed to parse multi-paper synthesis JSON: {err}")
+        data = {}
+
+    return {
+        "overall_synthesis": data.get("overall_synthesis") or "Synthesis statement unavailable based on the provided evidence.",
+        "similarities": data.get("similarities") if isinstance(data.get("similarities"), list) else [],
+        "differences": data.get("differences") if isinstance(data.get("differences"), list) else [],
+        "methodology_comparison": data.get("methodology_comparison") if isinstance(data.get("methodology_comparison"), list) else [],
+        "findings_comparison": data.get("findings_comparison") if isinstance(data.get("findings_comparison"), list) else [],
+        "research_gaps": data.get("research_gaps") if isinstance(data.get("research_gaps"), list) else [],
+    }
+
+
+def validate_and_resolve_source_refs(source_refs, valid_chunk_map):
+    """
+    Validate Gemini returned source_refs against DB PaperChunk map.
+    Returns verified sources containing DB page_number, text, and paper_title.
+    """
+    resolved_sources = []
+    if not isinstance(source_refs, list):
+        return resolved_sources
+
+    for ref in source_refs:
+        if not isinstance(ref, dict):
+            continue
+        cid = ref.get("chunk_id")
+        pid = ref.get("paper_id")
+
+        if cid in valid_chunk_map:
+            chunk = valid_chunk_map[cid]
+            # Verify paper_id matches chunk.paper.id
+            if pid is None or chunk.paper.id == pid:
+                resolved_sources.append({
+                    "paper_id": chunk.paper.id,
+                    "paper_title": chunk.paper.title,
+                    "chunk_id": chunk.id,
+                    "page_number": chunk.page_number,
+                    "text": chunk.text,
+                })
+    return resolved_sources
+
+
+def generate_multi_paper_synthesis(question, papers):
+    """
+    Perform single-call Gemini multi-paper cross-paper synthesis.
+
+    1. Calls local retrieve_multi_paper_evidence() to retrieve top evidence chunks.
+    2. Builds a bounded context (max 20 chunks total across 4 papers).
+    3. Makes EXACTLY ONE Gemini API call.
+    4. Validates returned source_refs against actual DB PaperChunk instances.
+    """
+    # 1. Retrieve local evidence chunks (0 Gemini calls)
+    query_text = (
+        question.strip()
+        if (question and isinstance(question, str) and question.strip())
+        else "main findings methodology limitations research gaps"
+    )
+
+    retrieved_groups = retrieve_multi_paper_evidence(
+        question=query_text,
+        papers=papers,
+        top_k_per_paper=5,
+    )
+
+    # Check for empty evidence
+    total_chunks = sum(len(group["sources"]) for group in retrieved_groups)
+    if total_chunks == 0:
+        return {
+            "question": query_text,
+            "papers": [{"paper_id": p.id, "title": p.title} for p in papers],
+            "comparison": {
+                "overall_synthesis": "Insufficient text content found across the selected papers to generate a comparison.",
+                "similarities": [],
+                "differences": [],
+                "methodology_comparison": [],
+                "findings_comparison": [],
+                "research_gaps": [],
+            },
+        }
+
+    # Fetch PaperChunk objects for valid_chunk_map to resolve & verify source_refs against DB
+    chunk_ids = [
+        source["chunk_id"]
+        for group in retrieved_groups
+        for source in group["sources"]
+    ]
+    db_chunks = PaperChunk.objects.filter(id__in=chunk_ids).select_related("paper")
+    valid_chunk_map = {chunk.id: chunk for chunk in db_chunks}
+
+    # Build prompt context format matching section 5 of requirements
+    context_blocks = []
+    for group in retrieved_groups:
+        paper_block = [f"PAPER ID: {group['paper_id']}\nTitle: {group['paper_title']}"]
+        for s in group["sources"]:
+            page_str = f"Page: {s['page_number']}" if s.get("page_number") else "Page: 1"
+            paper_block.append(f"SOURCE (Chunk ID: {s['chunk_id']}, {page_str}):\n{s['text']}")
+        context_blocks.append("\n\n".join(paper_block))
+
+    combined_context = "\n\n---\n\n".join(context_blocks)
+    paper_titles_str = ", ".join([f"'{p.title}' (ID: {p.id})" for p in papers])
+
+    prompt = f"""You are an expert academic research synthesis assistant.
+
+Analyze and compare the following research papers: {paper_titles_str}
+
+Use ONLY the provided paper source excerpts to synthesize similarities, differences, methodology, findings, and research gaps.
+
+Rules:
+- Base every statement ONLY on the supplied evidence excerpts.
+- Do NOT use outside knowledge or invent findings, methodology, limitations, or research gaps.
+- Do NOT invent paper titles, paper IDs, chunk IDs, or page numbers.
+- Ground claims in evidence. Do not claim agreement or disagreement unless supported by evidence.
+- Include "source_refs" referencing exact "paper_id" and "chunk_id" from the excerpts for every claim.
+
+Return your response STRICTLY as a JSON object matching this schema:
+{{
+    "overall_synthesis": "high-level synthesis statement",
+    "similarities": [
+        {{
+            "statement": "similarity statement",
+            "source_refs": [
+                {{"paper_id": 1, "chunk_id": 101}}
+            ]
+        }}
+    ],
+    "differences": [
+        {{
+            "statement": "difference statement",
+            "source_refs": [
+                {{"paper_id": 1, "chunk_id": 101}},
+                {{"paper_id": 2, "chunk_id": 201}}
+            ]
+        }}
+    ],
+    "methodology_comparison": [
+        {{
+            "paper_id": 1,
+            "summary": "methodology summary for this paper",
+            "source_refs": [
+                {{"paper_id": 1, "chunk_id": 101}}
+            ]
+        }}
+    ],
+    "findings_comparison": [
+        {{
+            "paper_id": 1,
+            "summary": "findings summary for this paper",
+            "source_refs": [
+                {{"paper_id": 1, "chunk_id": 101}}
+            ]
+        }}
+    ],
+    "research_gaps": [
+        {{
+            "statement": "gap or limitation statement",
+            "type": "explicit|potential",
+            "source_refs": [
+                {{"paper_id": 1, "chunk_id": 101}}
+            ]
+        }}
+    ]
+}}
+
+Source Excerpts:
+{combined_context}
+"""
+
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY is not configured.")
+
+    client = genai.Client(api_key=api_key)
+
+    # Single Gemini call limit (EXACTLY 1 request)
+    gemini_call_count = 1
+    print(f"[Multi-Paper Synthesis] Making Gemini call #{gemini_call_count} (EXACTLY 1 request)")
+    response = _call_gemini(client, prompt, json_mode=True, feature_name="multi_paper_synthesis")
+
+    raw_parsed = parse_multi_paper_synthesis_json(response.text)
+
+    # Validate and resolve source_refs against DB for each section
+    similarities = []
+    for item in raw_parsed["similarities"]:
+        if isinstance(item, dict) and item.get("statement"):
+            sources = validate_and_resolve_source_refs(item.get("source_refs"), valid_chunk_map)
+            similarities.append({
+                "statement": item["statement"],
+                "sources": sources,
+            })
+
+    differences = []
+    for item in raw_parsed["differences"]:
+        if isinstance(item, dict) and item.get("statement"):
+            sources = validate_and_resolve_source_refs(item.get("source_refs"), valid_chunk_map)
+            differences.append({
+                "statement": item["statement"],
+                "sources": sources,
+            })
+
+    methodology_comp = []
+    for item in raw_parsed["methodology_comparison"]:
+        if isinstance(item, dict) and (item.get("summary") or item.get("statement")):
+            summary_text = item.get("summary") or item.get("statement")
+            sources = validate_and_resolve_source_refs(item.get("source_refs"), valid_chunk_map)
+            methodology_comp.append({
+                "paper_id": item.get("paper_id"),
+                "summary": summary_text,
+                "sources": sources,
+            })
+
+    findings_comp = []
+    for item in raw_parsed["findings_comparison"]:
+        if isinstance(item, dict) and (item.get("summary") or item.get("statement")):
+            summary_text = item.get("summary") or item.get("statement")
+            sources = validate_and_resolve_source_refs(item.get("source_refs"), valid_chunk_map)
+            findings_comp.append({
+                "paper_id": item.get("paper_id"),
+                "summary": summary_text,
+                "sources": sources,
+            })
+
+    research_gaps = []
+    for item in raw_parsed["research_gaps"]:
+        if isinstance(item, dict) and item.get("statement"):
+            sources = validate_and_resolve_source_refs(item.get("source_refs"), valid_chunk_map)
+            gap_type = item.get("type") if item.get("type") in ["explicit", "potential"] else "explicit"
+            research_gaps.append({
+                "statement": item["statement"],
+                "type": gap_type,
+                "sources": sources,
+            })
+
+    print(f"[DIAGNOSTICS] Feature: multi_paper_synthesis | Gemini Calls: {gemini_call_count}")
+
+    return {
+        "question": query_text,
+        "papers": [{"paper_id": p.id, "title": p.title} for p in papers],
+        "comparison": {
+            "overall_synthesis": raw_parsed["overall_synthesis"],
+            "similarities": similarities,
+            "differences": differences,
+            "methodology_comparison": methodology_comp,
+            "findings_comparison": findings_comp,
+            "research_gaps": research_gaps,
+        },
+    }

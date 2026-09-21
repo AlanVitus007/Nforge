@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard';
 import Projects from './pages/Projects';
 import ProjectDetails from "./pages/ProjectDetails";
 import PaperDetails from "./pages/PaperDetails";
+import MultiPaperComparison from "./pages/MultiPaperComparison";
 import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import Layout from './components/Layout';
@@ -34,6 +35,10 @@ function App() {
               <Route path="/backend-test" element={<BackendTest />} />
               <Route path="/projects" element={<Projects />} />
               <Route path="/projects/:id" element={<ProjectDetails />} />
+              <Route
+                path="/projects/:projectId/compare"
+                element={<MultiPaperComparison />}
+              />
               <Route
                 path="/projects/:projectId/papers/:paperId"
                 element={<PaperDetails />}

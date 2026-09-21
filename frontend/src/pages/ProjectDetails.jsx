@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useNavigate } from "react-router-dom";
 import api from "../services/api";
 import Card from "../components/Card";
 import Button from "../components/Button";
@@ -7,6 +7,7 @@ import Input from "../components/Input";
 
 function ProjectDetails() {
     const { id } = useParams();
+    const navigate = useNavigate();
 
     const [project, setProject] = useState(null);
     const [papers, setPapers] = useState([]);
@@ -19,6 +20,11 @@ function ProjectDetails() {
     const [showDeletePopup, setShowDeletePopup] = useState(false);
     const [paperToDelete, setPaperToDelete] = useState(null);
     const [isDeleting, setIsDeleting] = useState(false);
+
+    // Phase 1: Selection State
+    const [selectedPaperIds, setSelectedPaperIds] = useState([]);
+    const [selectionNotice, setSelectionNotice] = useState("");
+    const [tempMessage, setTempMessage] = useState("");
 
     const fetchProject = async () => {
         try {
@@ -123,6 +129,10 @@ function ProjectDetails() {
                 )
             );
 
+            setSelectedPaperIds((prev) =>
+                prev.filter((paperId) => paperId !== paperToDelete.id)
+            );
+
             setShowDeletePopup(false);
             setPaperToDelete(null);
         } catch (err) {
@@ -131,6 +141,50 @@ function ProjectDetails() {
         } finally {
             setIsDeleting(false);
         }
+    };
+
+    const handlePaperSelectToggle = (paperId, e) => {
+        if (e) e.stopPropagation();
+        setSelectionNotice("");
+        setTempMessage("");
+        setSelectedPaperIds((prev) => {
+            if (prev.includes(paperId)) {
+                return prev.filter((id_) => id_ !== paperId);
+            } else {
+                if (prev.length >= 4) {
+                    setSelectionNotice("You can compare up to 4 papers at a time.");
+                    return prev;
+                }
+                return [...prev, paperId];
+            }
+        });
+    };
+
+    const handleSelectAll = () => {
+        setSelectionNotice("");
+        setTempMessage("");
+        const allIds = papers.map((p) => p.id);
+        if (allIds.length > 4) {
+            setSelectedPaperIds(allIds.slice(0, 4));
+            setSelectionNotice("You can compare up to 4 papers at a time.");
+        } else {
+            setSelectedPaperIds(allIds);
+        }
+    };
+
+    const handleClearSelection = () => {
+        setSelectionNotice("");
+        setTempMessage("");
+        setSelectedPaperIds([]);
+    };
+
+    const handleCompareClick = () => {
+        if (selectedPaperIds.length < 2) return;
+        navigate(`/projects/${id}/compare`, {
+            state: {
+                paperIds: selectedPaperIds
+            }
+        });
     };
 
     if (loading) {
@@ -149,6 +203,14 @@ function ProjectDetails() {
         );
     }
 
+    const selectedCount = selectedPaperIds.length;
+    const countText =
+        selectedCount === 0
+            ? "No papers selected"
+            : selectedCount === 1
+            ? "1 paper selected"
+            : `${selectedCount} papers selected`;
+
     return (
         <div
             style={{
@@ -158,16 +220,17 @@ function ProjectDetails() {
                 padding: "0 1.5rem",
                 boxSizing: "border-box",
             }}
-        >            <Link
-            to="/projects"
-            style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "0.5rem",
-                marginBottom: "1.5rem",
-                color: "var(--text-secondary)",
-            }}
         >
+            <Link
+                to="/projects"
+                style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "0.5rem",
+                    marginBottom: "1.5rem",
+                    color: "var(--text-secondary)",
+                }}
+            >
                 ← Back to Projects
             </Link>
 
@@ -190,6 +253,7 @@ function ProjectDetails() {
                     {project.description || "No description provided."}
                 </p>
             </div>
+
             <div
                 style={{
                     display: "grid",
@@ -273,9 +337,67 @@ function ProjectDetails() {
                 </aside>
 
                 <section>
-                    <h2 style={{ marginBottom: "1.5rem" }}>
-                        Research Papers
-                    </h2>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem", flexWrap: "wrap", gap: "1rem" }}>
+                        <h2 style={{ margin: 0 }}>
+                            Research Papers
+                        </h2>
+
+                        {papers.length > 0 && (
+                            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+                                <span style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--text-secondary)" }}>
+                                    {countText}
+                                </span>
+                                <button
+                                    onClick={handleSelectAll}
+                                    style={{
+                                        background: "none",
+                                        border: "1px solid var(--border-color)",
+                                        borderRadius: "var(--radius-sm)",
+                                        color: "var(--text-primary)",
+                                        fontSize: "0.8rem",
+                                        padding: "0.3rem 0.6rem",
+                                        cursor: "pointer",
+                                    }}
+                                >
+                                    Select All
+                                </button>
+                                <button
+                                    onClick={handleClearSelection}
+                                    style={{
+                                        background: "none",
+                                        border: "1px solid var(--border-color)",
+                                        borderRadius: "var(--radius-sm)",
+                                        color: "var(--text-secondary)",
+                                        fontSize: "0.8rem",
+                                        padding: "0.3rem 0.6rem",
+                                        cursor: "pointer",
+                                    }}
+                                >
+                                    Clear Selection
+                                </button>
+                                <Button
+                                    variant="primary"
+                                    onClick={handleCompareClick}
+                                    disabled={selectedPaperIds.length < 2}
+                                    style={{ fontSize: "0.875rem" }}
+                                >
+                                    Compare Selected Papers
+                                </Button>
+                            </div>
+                        )}
+                    </div>
+
+                    {selectionNotice && (
+                        <div style={{ padding: "0.75rem", background: "rgba(234, 179, 8, 0.15)", color: "#eab308", borderRadius: "var(--radius-md)", marginBottom: "1rem", fontSize: "0.875rem", fontWeight: 500 }}>
+                            {selectionNotice}
+                        </div>
+                    )}
+
+                    {tempMessage && (
+                        <div style={{ padding: "0.75rem", background: "rgba(99, 102, 241, 0.15)", color: "var(--accent-primary)", borderRadius: "var(--radius-md)", marginBottom: "1rem", fontSize: "0.875rem", fontWeight: 500 }}>
+                            {tempMessage}
+                        </div>
+                    )}
 
                     {papers.length === 0 ? (
                         <Card
@@ -306,69 +428,102 @@ function ProjectDetails() {
                                 gap: "1rem",
                             }}
                         >
-                            {papers.map((paper) => (
-                                <Card
-                                    key={paper.id}
-                                    className="card-glass"
-                                    style={{
-                                        display: "flex",
-                                        flexDirection: "column",
-                                    }}
-                                >
-                                    <h3
+                            {papers.map((paper) => {
+                                const isSelected = selectedPaperIds.includes(paper.id);
+                                return (
+                                    <Card
+                                        key={paper.id}
+                                        className="card-glass"
                                         style={{
-                                            margin: "0 0 0.5rem 0",
-                                            fontSize: "1.25rem",
-                                            lineHeight: "1.3",
+                                            display: "flex",
+                                            flexDirection: "column",
+                                            border: isSelected ? "2px solid var(--accent-primary)" : "1px solid var(--border-color)",
+                                            transition: "border-color 0.2s",
                                         }}
                                     >
-                                        <Link
-                                            to={`/projects/${id}/papers/${paper.id}`}
+                                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "0.5rem", marginBottom: "0.5rem" }}>
+                                            <h3
+                                                style={{
+                                                    margin: 0,
+                                                    fontSize: "1.25rem",
+                                                    lineHeight: "1.3",
+                                                }}
+                                            >
+                                                <Link
+                                                    to={`/projects/${id}/papers/${paper.id}`}
+                                                    style={{
+                                                        color: "var(--text-primary)",
+                                                    }}
+                                                >
+                                                    {paper.title}
+                                                </Link>
+                                            </h3>
+                                            <label
+                                                onClick={(e) => e.stopPropagation()}
+                                                style={{
+                                                    display: "inline-flex",
+                                                    alignItems: "center",
+                                                    gap: "0.35rem",
+                                                    fontSize: "0.8rem",
+                                                    cursor: "pointer",
+                                                    background: isSelected ? "rgba(99, 102, 241, 0.15)" : "var(--bg-tertiary)",
+                                                    color: isSelected ? "var(--accent-primary)" : "var(--text-secondary)",
+                                                    padding: "0.25rem 0.5rem",
+                                                    borderRadius: "var(--radius-sm)",
+                                                    border: isSelected ? "1px solid var(--accent-primary)" : "1px solid var(--border-color)",
+                                                    fontWeight: 600,
+                                                    whiteSpace: "nowrap",
+                                                }}
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isSelected}
+                                                    onChange={(e) => handlePaperSelectToggle(paper.id, e)}
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    style={{ cursor: "pointer" }}
+                                                />
+                                                {isSelected ? "Selected" : "Select"}
+                                            </label>
+                                        </div>
+
+                                        <p
                                             style={{
-                                                color: "var(--text-primary)",
+                                                margin: "0 0 1.5rem 0",
+                                                fontSize: "0.875rem",
+                                                color: "var(--text-muted)",
                                             }}
                                         >
-                                            {paper.title}
-                                        </Link>
-                                    </h3>
+                                            Uploaded:{" "}
+                                            {new Date(
+                                                paper.uploaded_at
+                                            ).toLocaleDateString()}
+                                        </p>
 
-                                    <p
-                                        style={{
-                                            margin: "0 0 1.5rem 0",
-                                            fontSize: "0.875rem",
-                                            color: "var(--text-muted)",
-                                        }}
-                                    >
-                                        Uploaded:{" "}
-                                        {new Date(
-                                            paper.uploaded_at
-                                        ).toLocaleDateString()}
-                                    </p>
-
-                                    <div
-                                        style={{
-                                            marginTop: "auto",
-                                            display: "flex",
-                                            justifyContent: "space-between",
-                                            alignItems: "center",
-                                            gap: "1rem",
-                                        }}
-                                    >
-                                        <Link to={`/projects/${id}/papers/${paper.id}`}>
-                                            <Button variant="secondary">
-                                                View & Analyze
-                                            </Button>
-                                        </Link>
-
-                                        <button
-                                            className="delete-button"
-                                            onClick={() => openDeletePopup(paper)}
+                                        <div
+                                            style={{
+                                                marginTop: "auto",
+                                                display: "flex",
+                                                justifyContent: "space-between",
+                                                alignItems: "center",
+                                                gap: "1rem",
+                                            }}
                                         >
-                                            Delete
-                                        </button>
-                                    </div>
-                                </Card>
-                            ))}
+                                            <Link to={`/projects/${id}/papers/${paper.id}`}>
+                                                <Button variant="secondary">
+                                                    View & Analyze
+                                                </Button>
+                                            </Link>
+
+                                            <button
+                                                className="delete-button"
+                                                onClick={() => openDeletePopup(paper)}
+                                            >
+                                                Delete
+                                            </button>
+                                        </div>
+                                    </Card>
+                                );
+                            })}
                         </div>
                     )}
                 </section>
