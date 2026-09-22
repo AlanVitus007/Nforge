@@ -7,10 +7,18 @@ import Projects from './pages/Projects';
 import ProjectDetails from "./pages/ProjectDetails";
 import PaperDetails from "./pages/PaperDetails";
 import MultiPaperComparison from "./pages/MultiPaperComparison";
-import { AuthProvider } from './context/AuthContext';
+import { useContext } from 'react';
+import { AuthProvider, AuthContext } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import Layout from './components/Layout';
+import Landing from './pages/Landing';
 import './App.css';
+
+function HomeRoute() {
+  const { user, loading } = useContext(AuthContext);
+  if (loading) return null;
+  return user ? <Dashboard /> : <Landing />;
+}
 
 function App() {
   return (
@@ -19,16 +27,7 @@ function App() {
         <Router>
           <Layout>
             <Routes>
-              <Route path="/" element={
-                <div style={{ textAlign: 'center', padding: '4rem 0' }}>
-                  <h1 style={{ fontSize: '3rem', marginBottom: '1rem', background: 'linear-gradient(to right, var(--accent-primary), var(--accent-secondary))', WebkitBackgroundClip: 'text', color: 'transparent' }}>
-                    Forge Your Research
-                  </h1>
-                  <p style={{ fontSize: '1.25rem', maxWidth: '600px', margin: '0 auto', color: 'var(--text-secondary)' }}>
-                    A modern platform to manage, analyze, and synthesize your academic papers and research projects.
-                  </p>
-                </div>
-              } />
+              <Route path="/" element={<HomeRoute />} />
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
               <Route path="/dashboard" element={<Dashboard />} />
