@@ -71,67 +71,6 @@ const Landing = () => {
                 </div>
             </section>
 
-            {/* Live Interface Preview Mockup */}
-            <section className="preview-container">
-                <div className="preview-window-bar">
-                    <div className="preview-window-dots">
-                        <span className="preview-dot"></span>
-                        <span className="preview-dot"></span>
-                        <span className="preview-dot"></span>
-                    </div>
-                    <div className="preview-window-title">nforge.workspace &mdash; synthesis-view</div>
-                    <div style={{ width: '40px' }}></div>
-                </div>
-
-                <div className="preview-inner">
-                    {/* Left preview card: Paper Extraction */}
-                    <div className="mockup-paper-card">
-                        <span className="mockup-header-tag">Deep Paper Extraction</span>
-                        <h4 className="mockup-title">Attention Is All You Need (Vaswani et al.)</h4>
-                        <div className="mockup-summary-box">
-                            <strong>Key Methodology:</strong> The authors propose the Transformer, an architecture eschewing recurrence and relying entirely on an attention mechanism to draw global dependencies between input and output.
-                        </div>
-                        <div className="mockup-evidence-pill">
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
-                            <span>Source: Section 3.1, Page 3</span>
-                        </div>
-                    </div>
-
-                    {/* Right preview card: Cross-Paper Matrix */}
-                    <div className="mockup-matrix-card">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span className="mockup-header-tag">Multi-Paper Synthesis Matrix</span>
-                            <span className="mockup-tag">3 Papers Selected</span>
-                        </div>
-                        <table className="mockup-table-preview">
-                            <thead>
-                                <tr>
-                                    <th>Paper</th>
-                                    <th>Core Approach</th>
-                                    <th>Reported BLEU</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Transformer (Base)</td>
-                                    <td>Self-attention without RNNs</td>
-                                    <td><span className="mockup-tag">27.3</span></td>
-                                </tr>
-                                <tr>
-                                    <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>ConvS2S (Gehring)</td>
-                                    <td>Layered convolutions</td>
-                                    <td><span className="mockup-tag">25.16</span></td>
-                                </tr>
-                                <tr>
-                                    <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>GNMT + RL (Wu)</td>
-                                    <td>8-layer LSTM + Residuals</td>
-                                    <td><span className="mockup-tag">24.60</span></td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </section>
 
             {/* Three Core Research Pillars */}
             <section className="landing-pillars">

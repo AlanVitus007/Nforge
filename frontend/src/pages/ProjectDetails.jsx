@@ -234,24 +234,36 @@ function ProjectDetails() {
                 ← Back to Projects
             </Link>
 
-            <div style={{ marginBottom: "3rem" }}>
-                <h1
-                    style={{
-                        fontSize: "2.5rem",
-                        marginBottom: "0.5rem",
-                    }}
-                >
-                    {project.title}
-                </h1>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "3rem", flexWrap: "wrap", gap: "1rem" }}>
+                <div>
+                    <h1
+                        style={{
+                            fontSize: "2.5rem",
+                            marginBottom: "0.5rem",
+                        }}
+                    >
+                        {project.title}
+                    </h1>
 
-                <p
-                    style={{
-                        fontSize: "1.125rem",
-                        color: "var(--text-secondary)",
-                    }}
-                >
-                    {project.description || "No description provided."}
-                </p>
+                    <p
+                        style={{
+                            fontSize: "1.125rem",
+                            color: "var(--text-secondary)",
+                            margin: 0,
+                        }}
+                    >
+                        {project.description || "No description provided."}
+                    </p>
+                </div>
+
+                <div>
+                    <Button
+                        variant="secondary"
+                        onClick={() => navigate(`/projects/${id}/research`)}
+                    >
+                        Research Workspace
+                    </Button>
+                </div>
             </div>
 
             <div

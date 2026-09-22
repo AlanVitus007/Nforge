@@ -759,6 +759,661 @@ class AskAIPersistenceAPITests(TestCase):
             self.assertEqual(ResearchMessage.objects.filter(session=self.session1).count(), 0)
 
 
+class ComparePapersPersistenceAPITests(TestCase):
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+        from ai.models import PaperChunk, ResearchSession
+
+        self.client = APIClient()
+        self.user1 = User.objects.create_user(username="compare_user1", password="password")
+        self.user2 = User.objects.create_user(username="compare_user2", password="password")
+
+        self.proj1 = Project.objects.create(owner=self.user1, title="Project 1")
+        self.proj1_other = Project.objects.create(owner=self.user1, title="Project 1 Other")
+        self.proj2 = Project.objects.create(owner=self.user2, title="Project 2")
+
+        self.paper1 = Paper.objects.create(project=self.proj1, title="Paper 1")
+        self.paper2 = Paper.objects.create(project=self.proj1, title="Paper 2")
+        self.paper_other_proj = Paper.objects.create(project=self.proj1_other, title="Paper in Proj 1 Other")
+        self.paper_user2 = Paper.objects.create(project=self.proj2, title="Paper User 2")
+
+        self.chunk1 = PaperChunk.objects.create(
+            paper=self.paper1,
+            chunk_index=0,
+            page_number=3,
+            text="Memory management architecture in paper 1.",
+            embedding=[0.1] * 384,
+        )
+        self.chunk2 = PaperChunk.objects.create(
+            paper=self.paper2,
+            chunk_index=0,
+            page_number=7,
+            text="Distributed consensus protocols in paper 2.",
+            embedding=[0.2] * 384,
+        )
+
+        self.session1 = ResearchSession.objects.create(project=self.proj1, title="Session 1")
+        self.session_user2 = ResearchSession.objects.create(project=self.proj2, title="Session User 2")
+
+    def test_compare_without_session_id_backward_compatibility(self):
+        self.client.force_authenticate(user=self.user1)
+        import json
+        from unittest.mock import patch, MagicMock
+        from ai.models import ResearchMessage, ResearchEvidence
+
+        mock_gemini_resp = MagicMock()
+        mock_gemini_resp.text = json.dumps({
+            "overall_synthesis": "Both papers discuss system architecture.",
+            "similarities": [],
+            "differences": [],
+            "methodology_comparison": [],
+            "findings_comparison": [],
+            "research_gaps": [],
+        })
+        dummy_query_emb = [0.1] * 384
+
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_gemini_resp):
+
+            resp = self.client.post("/api/ai/compare/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+                "question": "Compare system architectures",
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            self.assertIn("comparison", data)
+            self.assertIn("overall_synthesis", data["comparison"])
+            self.assertNotIn("session_id", data)
+
+            # Ensure no session message or evidence records created
+            self.assertEqual(ResearchMessage.objects.count(), 0)
+            self.assertEqual(ResearchEvidence.objects.count(), 0)
+
+    def test_compare_with_valid_session_id_persists_messages_and_evidence(self):
+        self.client.force_authenticate(user=self.user1)
+        import json
+        from unittest.mock import patch, MagicMock
+        from ai.models import ResearchMessage, ResearchEvidence
+
+        mock_gemini_resp = MagicMock()
+        mock_gemini_resp.text = json.dumps({
+            "overall_synthesis": "Both papers examine scalable systems.",
+            "similarities": [
+                {
+                    "statement": "Both use distributed structures.",
+                    "source_refs": [
+                        {"paper_id": self.paper1.id, "chunk_id": self.chunk1.id},
+                    ]
+                }
+            ],
+            "differences": [
+                {
+                    "statement": "Paper 2 focuses on consensus.",
+                    "source_refs": [
+                        {"paper_id": self.paper2.id, "chunk_id": self.chunk2.id},
+                    ]
+                }
+            ],
+            "methodology_comparison": [
+                {
+                    "paper_id": self.paper1.id,
+                    "summary": "Paper 1 uses memory benchmarks.",
+                    "source_refs": [
+                        {"paper_id": self.paper1.id, "chunk_id": self.chunk1.id},
+                    ]
+                }
+            ],
+            "findings_comparison": [],
+            "research_gaps": [],
+        })
+        dummy_query_emb = [0.1] * 384
+        initial_updated_at = self.session1.updated_at
+
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_gemini_resp):
+
+            resp = self.client.post("/api/ai/compare/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+                "question": "Compare the core architectures",
+                "session_id": self.session1.id,
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            self.assertEqual(data["session_id"], self.session1.id)
+            self.assertIn("comparison", data)
+            self.assertEqual(data["question"], "Compare the core architectures")
+
+            # 3. USER ResearchMessage is created
+            user_msg = ResearchMessage.objects.get(session=self.session1, role="USER")
+            # 5. Effective question stored
+            self.assertEqual(user_msg.content, "Compare the core architectures")
+
+            # 4. ASSISTANT ResearchMessage is created
+            assistant_msg = ResearchMessage.objects.get(session=self.session1, role="ASSISTANT")
+
+            # 6. Structured comparison JSON is stored
+            stored_comp = json.loads(assistant_msg.content)
+            self.assertEqual(stored_comp["overall_synthesis"], "Both papers examine scalable systems.")
+            self.assertEqual(len(stored_comp["similarities"]), 1)
+            self.assertEqual(len(stored_comp["differences"]), 1)
+            self.assertEqual(len(stored_comp["methodology_comparison"]), 1)
+
+            # 7. Evidence records are created
+            evidence_records = list(ResearchEvidence.objects.filter(message=assistant_msg).order_by("id"))
+            # chunk1 appeared in similarities and methodology_comparison, chunk2 appeared in differences.
+            # 12. Duplicate evidence sources are stored only once: exactly 2 evidence records!
+            self.assertEqual(len(evidence_records), 2)
+
+            # 8, 9, 10, 11: Correct paper, chunk, page_number, text
+            ev1 = evidence_records[0]
+            self.assertEqual(ev1.paper, self.paper1)
+            self.assertEqual(ev1.chunk, self.chunk1)
+            self.assertEqual(ev1.page_number, 3)
+            self.assertEqual(ev1.text, "Memory management architecture in paper 1.")
+
+            ev2 = evidence_records[1]
+            self.assertEqual(ev2.paper, self.paper2)
+            self.assertEqual(ev2.chunk, self.chunk2)
+            self.assertEqual(ev2.page_number, 7)
+            self.assertEqual(ev2.text, "Distributed consensus protocols in paper 2.")
+
+            # 10. Session updated_at refreshed
+            self.session1.refresh_from_db()
+            self.assertGreaterEqual(self.session1.updated_at, initial_updated_at)
+
+    def test_compare_with_empty_question_stores_effective_question(self):
+        self.client.force_authenticate(user=self.user1)
+        import json
+        from unittest.mock import patch, MagicMock
+        from ai.models import ResearchMessage
+
+        mock_gemini_resp = MagicMock()
+        mock_gemini_resp.text = json.dumps({
+            "overall_synthesis": "Default comparison summary.",
+            "similarities": [],
+            "differences": [],
+            "methodology_comparison": [],
+            "findings_comparison": [],
+            "research_gaps": [],
+        })
+        dummy_query_emb = [0.1] * 384
+
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_gemini_resp):
+
+            resp = self.client.post("/api/ai/compare/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+                "question": "",
+                "session_id": self.session1.id,
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            user_msg = ResearchMessage.objects.get(session=self.session1, role="USER")
+            self.assertEqual(user_msg.content, "main findings methodology limitations research gaps")
+
+    def test_compare_duplicate_evidence_stored_only_once(self):
+        self.client.force_authenticate(user=self.user1)
+        import json
+        from unittest.mock import patch, MagicMock
+        from ai.models import ResearchMessage, ResearchEvidence
+
+        # Same chunk1 referenced across multiple sections
+        mock_gemini_resp = MagicMock()
+        mock_gemini_resp.text = json.dumps({
+            "overall_synthesis": "Synthesis",
+            "similarities": [
+                {"statement": "Sim 1", "source_refs": [{"paper_id": self.paper1.id, "chunk_id": self.chunk1.id}]},
+                {"statement": "Sim 2", "source_refs": [{"paper_id": self.paper1.id, "chunk_id": self.chunk1.id}]},
+            ],
+            "differences": [
+                {"statement": "Diff 1", "source_refs": [{"paper_id": self.paper1.id, "chunk_id": self.chunk1.id}]},
+            ],
+            "methodology_comparison": [
+                {"paper_id": self.paper1.id, "summary": "Meth 1", "source_refs": [{"paper_id": self.paper1.id, "chunk_id": self.chunk1.id}]},
+            ],
+            "findings_comparison": [
+                {"paper_id": self.paper1.id, "summary": "Find 1", "source_refs": [{"paper_id": self.paper1.id, "chunk_id": self.chunk1.id}]},
+            ],
+            "research_gaps": [
+                {"statement": "Gap 1", "type": "explicit", "source_refs": [{"paper_id": self.paper1.id, "chunk_id": self.chunk1.id}]},
+            ],
+        })
+        dummy_query_emb = [0.1] * 384
+
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_gemini_resp):
+
+            resp = self.client.post("/api/ai/compare/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+                "question": "Check deduplication",
+                "session_id": self.session1.id,
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            assistant_msg = ResearchMessage.objects.get(session=self.session1, role="ASSISTANT")
+            evidence_count = ResearchEvidence.objects.filter(message=assistant_msg).count()
+            self.assertEqual(evidence_count, 1)
+
+    def test_compare_invalid_session_id_returns_404(self):
+        self.client.force_authenticate(user=self.user1)
+        resp = self.client.post("/api/ai/compare/", {
+            "paper_ids": [self.paper1.id, self.paper2.id],
+            "question": "Question?",
+            "session_id": 999999,
+        }, format="json")
+
+        self.assertEqual(resp.status_code, 404)
+        self.assertIn("not found", resp.json()["error"])
+
+    def test_compare_unauthorized_session_returns_403(self):
+        self.client.force_authenticate(user=self.user1)
+        resp = self.client.post("/api/ai/compare/", {
+            "paper_ids": [self.paper1.id, self.paper2.id],
+            "question": "Question?",
+            "session_id": self.session_user2.id,
+        }, format="json")
+
+        self.assertEqual(resp.status_code, 403)
+        self.assertIn("Access denied", resp.json()["error"])
+
+    def test_compare_paper_outside_session_project_returns_400(self):
+        self.client.force_authenticate(user=self.user1)
+        resp = self.client.post("/api/ai/compare/", {
+            "paper_ids": [self.paper1.id, self.paper_other_proj.id],
+            "question": "Question?",
+            "session_id": self.session1.id,
+        }, format="json")
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("do not belong to this research session", resp.json()["error"])
+
+    def test_compare_gemini_failure_rolls_back_user_message_and_evidence(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+        from ai.services import RateLimitError
+        from ai.models import ResearchMessage, ResearchEvidence
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("ai.views.generate_multi_paper_synthesis", side_effect=RateLimitError("Rate limit hit")):
+
+            resp = self.client.post("/api/ai/compare/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+                "question": "Will it fail?",
+                "session_id": self.session1.id,
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 429)
+
+            # Atomic transaction rollback check: 0 messages, 0 evidence saved
+            self.assertEqual(ResearchMessage.objects.filter(session=self.session1).count(), 0)
+            self.assertEqual(ResearchEvidence.objects.count(), 0)
+
+
+class ResearchSessionRESTAPITests(TestCase):
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+        from ai.models import ResearchSession, PaperChunk
+
+        self.client = APIClient()
+        self.user1 = User.objects.create_user(username="session_user1", password="password")
+        self.user2 = User.objects.create_user(username="session_user2", password="password")
+
+        self.proj1 = Project.objects.create(owner=self.user1, title="User1 Project")
+        self.proj2 = Project.objects.create(owner=self.user2, title="User2 Project")
+
+        self.paper1 = Paper.objects.create(project=self.proj1, title="Paper A")
+        self.paper2 = Paper.objects.create(project=self.proj1, title="Paper B")
+
+        self.chunk1 = PaperChunk.objects.create(
+            paper=self.paper1,
+            chunk_index=0,
+            page_number=5,
+            text="Evidence excerpt text from Paper A.",
+            embedding=[0.1] * 384,
+        )
+
+    def test_create_session_with_default_title(self):
+        self.client.force_authenticate(user=self.user1)
+        from ai.models import ResearchSession
+
+        resp = self.client.post("/api/ai/sessions/", {
+            "project_id": self.proj1.id,
+        }, format="json")
+
+        self.assertEqual(resp.status_code, 201)
+        data = resp.json()
+        self.assertEqual(data["project_id"], self.proj1.id)
+        self.assertEqual(data["title"], "Research Session")
+        self.assertEqual(data["papers"], [])
+        self.assertIn("created_at", data)
+        self.assertIn("updated_at", data)
+        self.assertTrue(ResearchSession.objects.filter(id=data["id"]).exists())
+
+    def test_create_session_with_custom_title(self):
+        self.client.force_authenticate(user=self.user1)
+        resp = self.client.post("/api/ai/sessions/", {
+            "project_id": self.proj1.id,
+            "title": "Literature Review"
+        }, format="json")
+
+        self.assertEqual(resp.status_code, 201)
+        data = resp.json()
+        self.assertEqual(data["title"], "Literature Review")
+
+    def test_create_session_unauthorized_project_returns_403(self):
+        self.client.force_authenticate(user=self.user1)
+        resp = self.client.post("/api/ai/sessions/", {
+            "project_id": self.proj2.id,
+            "title": "Unauthorized Session"
+        }, format="json")
+
+        self.assertEqual(resp.status_code, 403)
+        self.assertIn("Access denied", resp.json()["error"])
+
+    def test_create_session_missing_project_id_returns_400(self):
+        self.client.force_authenticate(user=self.user1)
+        resp = self.client.post("/api/ai/sessions/", {
+            "title": "No Project ID"
+        }, format="json")
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("project_id", resp.json()["error"])
+
+    def test_create_session_nonexistent_project_returns_404(self):
+        self.client.force_authenticate(user=self.user1)
+        resp = self.client.post("/api/ai/sessions/", {
+            "project_id": 999999,
+            "title": "Nonexistent Project"
+        }, format="json")
+
+        self.assertEqual(resp.status_code, 404)
+        self.assertIn("Project not found", resp.json()["error"])
+
+    def test_list_sessions_missing_project_id_returns_400(self):
+        self.client.force_authenticate(user=self.user1)
+        resp = self.client.get("/api/ai/sessions/")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("project_id", resp.json()["error"])
+
+    def test_list_sessions_nonexistent_project_returns_404(self):
+        self.client.force_authenticate(user=self.user1)
+        resp = self.client.get("/api/ai/sessions/?project_id=999999")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_list_sessions_unauthorized_project_returns_403(self):
+        self.client.force_authenticate(user=self.user1)
+        resp = self.client.get(f"/api/ai/sessions/?project_id={self.proj2.id}")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_list_sessions_success_ordered_by_updated_at_descending(self):
+        self.client.force_authenticate(user=self.user1)
+        from ai.models import ResearchSession
+        from django.utils import timezone
+        import datetime
+
+        s1 = ResearchSession.objects.create(project=self.proj1, title="Session 1")
+        s2 = ResearchSession.objects.create(project=self.proj1, title="Session 2")
+        # Touch s1 so updated_at is later
+        ResearchSession.objects.filter(id=s1.id).update(updated_at=timezone.now() + datetime.timedelta(seconds=10))
+
+        resp = self.client.get(f"/api/ai/sessions/?project_id={self.proj1.id}")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(len(data), 2)
+        # s1 should be first because of later updated_at
+        self.assertEqual(data[0]["id"], s1.id)
+        self.assertEqual(data[1]["id"], s2.id)
+
+    def test_retrieve_session_chronological_messages_and_evidence(self):
+        self.client.force_authenticate(user=self.user1)
+        from ai.models import ResearchSession, ResearchMessage, ResearchEvidence
+
+        session = ResearchSession.objects.create(project=self.proj1, title="Literature Review")
+        session.papers.add(self.paper1)
+
+        msg1 = ResearchMessage.objects.create(
+            session=session,
+            role="USER",
+            content="What methodology does this paper use?",
+        )
+        msg2 = ResearchMessage.objects.create(
+            session=session,
+            role="ASSISTANT",
+            content="The paper uses a transformer architecture.",
+        )
+        ev1 = ResearchEvidence.objects.create(
+            message=msg2,
+            paper=self.paper1,
+            chunk=self.chunk1,
+            page_number=5,
+            text="Evidence excerpt text from Paper A.",
+        )
+
+        resp = self.client.get(f"/api/ai/sessions/{session.id}/")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["id"], session.id)
+        self.assertEqual(data["title"], "Literature Review")
+        self.assertEqual(len(data["papers"]), 1)
+        self.assertEqual(data["papers"][0]["id"], self.paper1.id)
+        self.assertEqual(data["papers"][0]["title"], self.paper1.title)
+
+        # Messages: chronological order
+        self.assertEqual(len(data["messages"]), 2)
+        self.assertEqual(data["messages"][0]["id"], msg1.id)
+        self.assertEqual(data["messages"][0]["role"], "USER")
+        self.assertEqual(data["messages"][0]["content"], "What methodology does this paper use?")
+
+        self.assertEqual(data["messages"][1]["id"], msg2.id)
+        self.assertEqual(data["messages"][1]["role"], "ASSISTANT")
+        self.assertEqual(len(data["messages"][1]["evidence"]), 1)
+
+        evidence_data = data["messages"][1]["evidence"][0]
+        self.assertEqual(evidence_data["id"], ev1.id)
+        self.assertEqual(evidence_data["paper_id"], self.paper1.id)
+        self.assertEqual(evidence_data["paper_title"], self.paper1.title)
+        self.assertEqual(evidence_data["chunk_id"], self.chunk1.id)
+        self.assertEqual(evidence_data["page_number"], 5)
+        self.assertEqual(evidence_data["text"], "Evidence excerpt text from Paper A.")
+
+    def test_retrieve_session_preserves_structured_comparison_json(self):
+        self.client.force_authenticate(user=self.user1)
+        import json
+        from ai.models import ResearchSession, ResearchMessage
+
+        comparison_payload = {
+            "overall_synthesis": "Synthesis statement.",
+            "similarities": [{"statement": "Sim 1", "sources": []}],
+            "differences": [{"statement": "Diff 1", "sources": []}],
+            "methodology_comparison": [],
+            "findings_comparison": [],
+            "research_gaps": [],
+        }
+        json_content = json.dumps(comparison_payload)
+
+        session = ResearchSession.objects.create(project=self.proj1, title="Compare Session")
+        ResearchMessage.objects.create(session=session, role="USER", content="Compare papers")
+        ResearchMessage.objects.create(session=session, role="ASSISTANT", content=json_content)
+
+        resp = self.client.get(f"/api/ai/sessions/{session.id}/")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        assistant_content = data["messages"][1]["content"]
+        self.assertEqual(assistant_content, json_content)
+        parsed = json.loads(assistant_content)
+        self.assertEqual(parsed["overall_synthesis"], "Synthesis statement.")
+
+    def test_retrieve_session_unauthorized_returns_403(self):
+        self.client.force_authenticate(user=self.user1)
+        from ai.models import ResearchSession
+
+        session_other = ResearchSession.objects.create(project=self.proj2, title="Other Session")
+        resp = self.client.get(f"/api/ai/sessions/{session_other.id}/")
+        self.assertEqual(resp.status_code, 403)
+        self.assertIn("Access denied", resp.json()["error"])
+
+    def test_retrieve_session_not_found_returns_404(self):
+        self.client.force_authenticate(user=self.user1)
+        resp = self.client.get("/api/ai/sessions/999999/")
+        self.assertEqual(resp.status_code, 404)
+        self.assertIn("not found", resp.json()["error"])
+
+    def test_update_session_title(self):
+        self.client.force_authenticate(user=self.user1)
+        from ai.models import ResearchSession
+
+        session = ResearchSession.objects.create(project=self.proj1, title="Original Title")
+        resp = self.client.patch(f"/api/ai/sessions/{session.id}/", {
+            "title": "Final Literature Review",
+            "project_id": self.proj2.id,
+        }, format="json")
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["title"], "Final Literature Review")
+        session.refresh_from_db()
+        self.assertEqual(session.title, "Final Literature Review")
+        self.assertEqual(session.project, self.proj1)
+
+    def test_update_session_unauthorized_returns_403(self):
+        self.client.force_authenticate(user=self.user1)
+        from ai.models import ResearchSession
+
+        session_other = ResearchSession.objects.create(project=self.proj2, title="Other Title")
+        resp = self.client.patch(f"/api/ai/sessions/{session_other.id}/", {
+            "title": "Hacked Title"
+        }, format="json")
+
+        self.assertEqual(resp.status_code, 403)
+        session_other.refresh_from_db()
+        self.assertEqual(session_other.title, "Other Title")
+
+    def test_delete_session_cascades_messages_and_evidence(self):
+        self.client.force_authenticate(user=self.user1)
+        from ai.models import ResearchSession, ResearchMessage, ResearchEvidence
+
+        session = ResearchSession.objects.create(project=self.proj1, title="To Delete")
+        msg = ResearchMessage.objects.create(session=session, role="ASSISTANT", content="Answer")
+        ev = ResearchEvidence.objects.create(
+            message=msg,
+            paper=self.paper1,
+            chunk=self.chunk1,
+            page_number=5,
+            text="Evidence",
+        )
+
+        resp = self.client.delete(f"/api/ai/sessions/{session.id}/")
+        self.assertEqual(resp.status_code, 204)
+
+        # Verify session deleted
+        self.assertFalse(ResearchSession.objects.filter(id=session.id).exists())
+        # Verify cascaded deletion of messages and evidence
+        self.assertFalse(ResearchMessage.objects.filter(id=msg.id).exists())
+        self.assertFalse(ResearchEvidence.objects.filter(id=ev.id).exists())
+
+        # Verify parent models (Project, Paper, PaperChunk) are NOT deleted
+        self.assertTrue(Project.objects.filter(id=self.proj1.id).exists())
+        self.assertTrue(Paper.objects.filter(id=self.paper1.id).exists())
+        self.assertTrue(self.chunk1.__class__.objects.filter(id=self.chunk1.id).exists())
+
+    def test_delete_session_unauthorized_returns_403(self):
+        self.client.force_authenticate(user=self.user1)
+        from ai.models import ResearchSession
+
+        session_other = ResearchSession.objects.create(project=self.proj2, title="Other Delete")
+        resp = self.client.delete(f"/api/ai/sessions/{session_other.id}/")
+        self.assertEqual(resp.status_code, 403)
+        self.assertTrue(ResearchSession.objects.filter(id=session_other.id).exists())
+
+    def test_update_session_papers_success(self):
+        self.client.force_authenticate(user=self.user1)
+        from ai.models import ResearchSession
+
+        session = ResearchSession.objects.create(project=self.proj1, title="Session Papers Test")
+        self.assertEqual(session.papers.count(), 0)
+
+        resp = self.client.patch(f"/api/ai/sessions/{session.id}/", {
+            "papers": [self.paper1.id, self.paper2.id]
+        }, format="json")
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(len(data["papers"]), 2)
+        returned_ids = [p["id"] for p in data["papers"]]
+        self.assertIn(self.paper1.id, returned_ids)
+        self.assertIn(self.paper2.id, returned_ids)
+
+        session.refresh_from_db()
+        self.assertEqual(session.papers.count(), 2)
+
+    def test_update_session_papers_empty_list(self):
+        self.client.force_authenticate(user=self.user1)
+        from ai.models import ResearchSession
+
+        session = ResearchSession.objects.create(project=self.proj1, title="Session Clear Papers")
+        session.papers.add(self.paper1)
+        self.assertEqual(session.papers.count(), 1)
+
+        resp = self.client.patch(f"/api/ai/sessions/{session.id}/", {
+            "papers": []
+        }, format="json")
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(len(data["papers"]), 0)
+
+        session.refresh_from_db()
+        self.assertEqual(session.papers.count(), 0)
+
+    def test_update_session_papers_invalid_id(self):
+        self.client.force_authenticate(user=self.user1)
+        from ai.models import ResearchSession
+
+        session = ResearchSession.objects.create(project=self.proj1, title="Session Invalid Paper")
+        resp = self.client.patch(f"/api/ai/sessions/{session.id}/", {
+            "papers": [self.paper1.id, 999999]
+        }, format="json")
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("invalid or do not belong to this project", resp.json()["error"])
+
+    def test_update_session_papers_different_project(self):
+        self.client.force_authenticate(user=self.user1)
+        from ai.models import ResearchSession
+
+        other_proj_paper = Paper.objects.create(project=self.proj2, title="Other Project Paper")
+        session = ResearchSession.objects.create(project=self.proj1, title="Session Foreign Paper")
+        resp = self.client.patch(f"/api/ai/sessions/{session.id}/", {
+            "papers": [other_proj_paper.id]
+        }, format="json")
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("invalid or do not belong to this project", resp.json()["error"])
+
+    def test_update_session_papers_invalid_type(self):
+        self.client.force_authenticate(user=self.user1)
+        from ai.models import ResearchSession
+
+        session = ResearchSession.objects.create(project=self.proj1, title="Session Bad Type")
+        resp = self.client.patch(f"/api/ai/sessions/{session.id}/", {
+            "papers": "not-a-list"
+        }, format="json")
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("must be a list", resp.json()["error"])
+
+
+
+
 
 
 

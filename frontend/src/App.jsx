@@ -7,6 +7,7 @@ import Projects from './pages/Projects';
 import ProjectDetails from "./pages/ProjectDetails";
 import PaperDetails from "./pages/PaperDetails";
 import MultiPaperComparison from "./pages/MultiPaperComparison";
+import ResearchWorkspace from "./pages/ResearchWorkspace";
 import { useContext } from 'react';
 import { AuthProvider, AuthContext } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
@@ -37,6 +38,10 @@ function App() {
               <Route
                 path="/projects/:projectId/compare"
                 element={<MultiPaperComparison />}
+              />
+              <Route
+                path="/projects/:projectId/research"
+                element={<ResearchWorkspace />}
               />
               <Route
                 path="/projects/:projectId/papers/:paperId"

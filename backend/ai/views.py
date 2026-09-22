@@ -1,3 +1,4 @@
+import json
 from django.shortcuts import render
 from django.db import transaction
 
@@ -6,8 +7,13 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 
+from projects.models import Project
 from papers.models import Paper
 from .models import PaperChunk, ResearchSession, ResearchMessage, ResearchEvidence
+from .serializers import (
+    ResearchSessionListSerializer,
+    ResearchSessionDetailSerializer,
+)
 from .services import (
     semantic_search,
     generate_ai_answer,
@@ -206,6 +212,7 @@ def compare_papers_view(request):
     try:
         paper_ids = request.data.get("paper_ids")
         question = request.data.get("question")
+        session_id = request.data.get("session_id")
 
         # 1. Validate paper_ids existence & type
         if paper_ids is None or not isinstance(paper_ids, list):
@@ -254,23 +261,270 @@ def compare_papers_view(request):
 
             ordered_papers.append(paper)
 
-        # 5. Default query fallback if question is empty/missing (0 Gemini calls!)
+        # 5. Session validation (optional session_id)
+        session = None
+        if session_id is not None:
+            try:
+                session = ResearchSession.objects.get(id=session_id)
+            except (ResearchSession.DoesNotExist, ValueError, TypeError):
+                return Response({
+                    "error": "Research session not found.",
+                    "code": "NOT_FOUND"
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            if session.project.owner != request.user:
+                return Response({
+                    "error": "Access denied.",
+                    "code": "FORBIDDEN"
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            for paper in ordered_papers:
+                if paper.project != session.project:
+                    return Response({
+                        "error": "One or more papers do not belong to this research session.",
+                        "code": "BAD_REQUEST"
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+        # 6. Default query fallback if question is empty/missing (0 Gemini calls!)
         query_text = (
             question.strip()
             if (question and isinstance(question, str) and question.strip())
             else "main findings methodology limitations research gaps"
         )
 
-        # 6. Perform cross-paper synthesis with single Gemini call and DB-validated evidence
-        comparison_response = generate_multi_paper_synthesis(
-            question=query_text,
-            papers=ordered_papers,
-        )
+        # 7. Perform cross-paper synthesis and persist to ResearchSession if provided
+        if session:
+            with transaction.atomic():
+                user_msg = ResearchMessage.objects.create(
+                    session=session,
+                    role=ResearchMessage.ROLE_USER,
+                    content=query_text,
+                )
 
-        return Response(comparison_response, status=status.HTTP_200_OK)
+                comparison_response = generate_multi_paper_synthesis(
+                    question=query_text,
+                    papers=ordered_papers,
+                )
+
+                assistant_msg = ResearchMessage.objects.create(
+                    session=session,
+                    role=ResearchMessage.ROLE_ASSISTANT,
+                    content=json.dumps(comparison_response.get("comparison", {})),
+                )
+
+                # Collect all validated sources without duplication
+                comparison_data = comparison_response.get("comparison", {})
+                unique_sources = []
+                seen_keys = set()
+                sections = [
+                    comparison_data.get("similarities", []),
+                    comparison_data.get("differences", []),
+                    comparison_data.get("methodology_comparison", []),
+                    comparison_data.get("findings_comparison", []),
+                    comparison_data.get("research_gaps", []),
+                ]
+
+                for section in sections:
+                    if isinstance(section, list):
+                        for item in section:
+                            if isinstance(item, dict):
+                                for src in item.get("sources", []):
+                                    if isinstance(src, dict):
+                                        cid = src.get("chunk_id")
+                                        pid = src.get("paper_id")
+                                        dedup_key = (pid, cid) if cid is not None else (pid, src.get("page_number"), src.get("text"))
+                                        if dedup_key not in seen_keys:
+                                            seen_keys.add(dedup_key)
+                                            unique_sources.append(src)
+
+                paper_map = {p.id: p for p in ordered_papers}
+                chunk_ids = [s.get("chunk_id") for s in unique_sources if s.get("chunk_id")]
+                chunks_by_id = {c.id: c for c in PaperChunk.objects.filter(id__in=chunk_ids)} if chunk_ids else {}
+
+                for src in unique_sources:
+                    paper_id = src.get("paper_id")
+                    paper_obj = paper_map.get(paper_id)
+                    if not paper_obj and paper_id:
+                        paper_obj = Paper.objects.filter(id=paper_id).first()
+                    if not paper_obj:
+                        continue
+
+                    chunk_obj = chunks_by_id.get(src.get("chunk_id"))
+
+                    ResearchEvidence.objects.create(
+                        message=assistant_msg,
+                        paper=paper_obj,
+                        chunk=chunk_obj,
+                        page_number=src.get("page_number"),
+                        text=src.get("text") or "",
+                    )
+
+                session.save()
+                comparison_response["session_id"] = session.id
+                return Response(comparison_response, status=status.HTTP_200_OK)
+        else:
+            comparison_response = generate_multi_paper_synthesis(
+                question=query_text,
+                papers=ordered_papers,
+            )
+            return Response(comparison_response, status=status.HTTP_200_OK)
 
     except Exception as e:
         return handle_ai_exception(e)
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def session_list_create_view(request):
+    try:
+        if request.method == "POST":
+            project_id = request.data.get("project_id")
+            if project_id is None:
+                return Response({
+                    "error": "project_id is required.",
+                    "code": "BAD_REQUEST"
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                project = Project.objects.get(id=project_id)
+            except (Project.DoesNotExist, ValueError, TypeError):
+                return Response({
+                    "error": "Project not found.",
+                    "code": "NOT_FOUND"
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            if project.owner != request.user:
+                return Response({
+                    "error": "Access denied.",
+                    "code": "FORBIDDEN"
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            title = request.data.get("title")
+            if title is None or (isinstance(title, str) and not title.strip()):
+                title = "Research Session"
+            elif isinstance(title, str):
+                title = title.strip()
+
+            session = ResearchSession.objects.create(
+                project=project,
+                title=title,
+            )
+
+            serializer = ResearchSessionListSerializer(session)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        elif request.method == "GET":
+            project_id = request.query_params.get("project_id")
+            if not project_id:
+                return Response({
+                    "error": "project_id query parameter is required.",
+                    "code": "BAD_REQUEST"
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                project = Project.objects.get(id=project_id)
+            except (Project.DoesNotExist, ValueError, TypeError):
+                return Response({
+                    "error": "Project not found.",
+                    "code": "NOT_FOUND"
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            if project.owner != request.user:
+                return Response({
+                    "error": "Access denied.",
+                    "code": "FORBIDDEN"
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            sessions = ResearchSession.objects.filter(project=project).order_by("-updated_at")
+            serializer = ResearchSessionListSerializer(sessions, many=True)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return handle_ai_exception(e)
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@permission_classes([IsAuthenticated])
+def session_detail_view(request, session_id):
+    try:
+        try:
+            session = ResearchSession.objects.select_related("project__owner").prefetch_related(
+                "papers",
+                "messages__evidence__paper",
+                "messages__evidence__chunk"
+            ).get(id=session_id)
+        except (ResearchSession.DoesNotExist, ValueError, TypeError):
+            return Response({
+                "error": "Research session not found.",
+                "code": "NOT_FOUND"
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        if session.project.owner != request.user:
+            return Response({
+                "error": "Access denied.",
+                "code": "FORBIDDEN"
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        if request.method == "GET":
+            serializer = ResearchSessionDetailSerializer(session)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        elif request.method == "PATCH":
+            title = request.data.get("title")
+            if title is not None:
+                if not isinstance(title, str) or not title.strip():
+                    return Response({
+                        "error": "Title cannot be empty.",
+                        "code": "BAD_REQUEST"
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                session.title = title.strip()
+                session.save(update_fields=["title", "updated_at"])
+
+            if "papers" in request.data:
+                paper_ids = request.data.get("papers")
+                if not isinstance(paper_ids, list):
+                    return Response({
+                        "error": "papers must be a list of paper IDs.",
+                        "code": "BAD_REQUEST"
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+                valid_ids = []
+                for pid in paper_ids:
+                    try:
+                        valid_ids.append(int(pid))
+                    except (ValueError, TypeError):
+                        return Response({
+                            "error": "All paper IDs must be integers.",
+                            "code": "BAD_REQUEST"
+                        }, status=status.HTTP_400_BAD_REQUEST)
+
+                project_papers = list(Paper.objects.filter(id__in=valid_ids, project=session.project))
+                if len(project_papers) != len(set(valid_ids)):
+                    return Response({
+                        "error": "One or more paper IDs are invalid or do not belong to this project.",
+                        "code": "BAD_REQUEST"
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+                session.papers.set(project_papers)
+                session.save()
+
+            # Refresh session to ensure prefetch caches reflect updated papers
+            session = ResearchSession.objects.select_related("project__owner").prefetch_related(
+                "papers",
+                "messages__evidence__paper",
+                "messages__evidence__chunk"
+            ).get(id=session.id)
+
+            serializer = ResearchSessionDetailSerializer(session)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        elif request.method == "DELETE":
+            session.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+    except Exception as e:
+        return handle_ai_exception(e)
+
 
 
 

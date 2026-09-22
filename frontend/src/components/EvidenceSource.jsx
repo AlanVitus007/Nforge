@@ -3,15 +3,19 @@ import { useNavigate } from "react-router-dom";
 function EvidenceSource({ source, projectId }) {
     const navigate = useNavigate();
 
-    if (!source) return null;
+    if (!source || !source.paper_id) return null;
 
     const paperTitle = source.paper_title || `Paper #${source.paper_id}`;
-    const pageNum = source.page_number ? `Page ${source.page_number}` : "Page 1";
+    const hasPage = source.page_number !== null && source.page_number !== undefined && source.page_number !== "";
+    const pageNum = hasPage ? `Page ${source.page_number}` : null;
 
     const handleOpenEvidence = (e) => {
         e.preventDefault();
-        const targetPage = source.page_number || 1;
-        navigate(`/projects/${projectId}/papers/${source.paper_id}?page=${targetPage}`);
+        if (hasPage) {
+            navigate(`/projects/${projectId}/papers/${source.paper_id}?page=${source.page_number}`);
+        } else {
+            navigate(`/projects/${projectId}/papers/${source.paper_id}`);
+        }
     };
 
     return (
@@ -31,10 +35,11 @@ function EvidenceSource({ source, projectId }) {
                 flexWrap: "wrap",
             }}>
                 <span style={{ fontWeight: 600, fontSize: "0.875rem", color: "var(--text-primary)" }}>
-                    {paperTitle} · {pageNum}
+                    {paperTitle}{pageNum ? ` · ${pageNum}` : ""}
                 </span>
                 <button
                     onClick={handleOpenEvidence}
+                    type="button"
                     style={{
                         background: "var(--accent-primary)",
                         color: "#ffffff",
