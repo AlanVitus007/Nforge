@@ -170,9 +170,11 @@ class PaperListCreateView(generics.ListCreateAPIView):
             print(f"PDF processing failed: {error}")
 
 
-class PaperDetailView(generics.RetrieveDestroyAPIView):
+class PaperDetailView(generics.RetrieveUpdateDestroyAPIView):
     """
     GET    /api/projects/<project_id>/papers/<paper_id>/
+    PUT    /api/projects/<project_id>/papers/<paper_id>/
+    PATCH  /api/projects/<project_id>/papers/<paper_id>/
     DELETE /api/projects/<project_id>/papers/<paper_id>/
     """
 

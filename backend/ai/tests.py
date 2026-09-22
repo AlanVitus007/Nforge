@@ -2,7 +2,7 @@ from django.test import TestCase
 from django.contrib.auth.models import User
 from projects.models import Project
 from papers.models import Paper
-from ai.models import PaperChunk
+from ai.models import PaperChunk, ResearchSession, ResearchMessage, ResearchEvidence
 from ai.services import (
     split_into_sentences,
     split_text_structure_aware,
@@ -1410,6 +1410,951 @@ class ResearchSessionRESTAPITests(TestCase):
 
         self.assertEqual(resp.status_code, 400)
         self.assertIn("must be a list", resp.json()["error"])
+
+
+class ResearchGapAnalysisServiceTests(TestCase):
+    """
+    Focused tests for Phase 7.1.1: Research Gap Analysis backend service.
+    Verifies structured schema, multi-paper retrieval reuse, single Gemini call,
+    parsing robustness, source reference resolution, page number preservation,
+    and boundary handling.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="gap_user", password="password")
+        self.project = Project.objects.create(owner=self.user, title="Gap Analysis Project")
+
+        self.paper1 = Paper.objects.create(project=self.project, title="Paper Alpha")
+        self.paper2 = Paper.objects.create(project=self.project, title="Paper Beta")
+        self.paper3 = Paper.objects.create(project=self.project, title="Paper Gamma")
+        self.paper4 = Paper.objects.create(project=self.project, title="Paper Delta")
+
+        self.chunk1 = PaperChunk.objects.create(
+            paper=self.paper1,
+            chunk_index=0,
+            page_number=5,
+            text="Paper Alpha has sample size limitations and small cohort.",
+            embedding=[0.1] * 384,
+        )
+        self.chunk2 = PaperChunk.objects.create(
+            paper=self.paper2,
+            chunk_index=0,
+            page_number=12,
+            text="Paper Beta lacks longitudinal evaluation and tracking.",
+            embedding=[0.1] * 384,
+        )
+        self.chunk3 = PaperChunk.objects.create(
+            paper=self.paper3,
+            chunk_index=0,
+            page_number=20,
+            text="Paper Gamma dataset only covers US cohort demographics.",
+            embedding=[0.1] * 384,
+        )
+        self.chunk4 = PaperChunk.objects.create(
+            paper=self.paper4,
+            chunk_index=0,
+            page_number=8,
+            text="Paper Delta contradicts Alpha regarding algorithm convergence speed.",
+            embedding=[0.1] * 384,
+        )
+
+    def test_valid_structured_gap_analysis_response(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_research_gap_analysis
+
+        mock_gemini_response = MagicMock()
+        mock_gemini_response.text = f"""{{
+            "overall_assessment": "Comprehensive gap assessment across 3 papers.",
+            "common_limitations": [
+                {{
+                    "statement": "Sample size is small.",
+                    "source_refs": [{{"paper_id": {self.paper1.id}, "chunk_id": {self.chunk1.id}}}]
+                }}
+            ],
+            "methodological_gaps": [
+                {{
+                    "statement": "No longitudinal tracking.",
+                    "source_refs": [{{"paper_id": {self.paper2.id}, "chunk_id": {self.chunk2.id}}}]
+                }}
+            ],
+            "dataset_population_gaps": [
+                {{
+                    "statement": "Demographics limited to US cohort.",
+                    "source_refs": [{{"paper_id": {self.paper3.id}, "chunk_id": {self.chunk3.id}}}]
+                }}
+            ],
+            "understudied_areas": [
+                {{
+                    "statement": "Low resource environments understudied.",
+                    "source_refs": [{{"paper_id": {self.paper1.id}, "chunk_id": {self.chunk1.id}}}]
+                }}
+            ],
+            "contradictions_inconsistencies": [
+                {{
+                    "statement": "Discrepancy in convergence findings.",
+                    "source_refs": [
+                        {{"paper_id": {self.paper1.id}, "chunk_id": {self.chunk1.id}}},
+                        {{"paper_id": {self.paper2.id}, "chunk_id": {self.chunk2.id}}}
+                    ]
+                }}
+            ],
+            "unanswered_research_questions": [
+                {{
+                    "question": "How does this method scale to 10M parameters?",
+                    "source_refs": [{{"paper_id": {self.paper2.id}, "chunk_id": {self.chunk2.id}}}]
+                }}
+            ],
+            "future_research_directions": [
+                {{
+                    "direction": "Test against cross-continental datasets.",
+                    "source_refs": [{{"paper_id": {self.paper3.id}, "chunk_id": {self.chunk3.id}}}]
+                }}
+            ]
+        }}"""
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_gemini_response) as mock_gemini:
+
+            result = generate_research_gap_analysis(
+                question="Identify research gaps and limitations",
+                papers=[self.paper1, self.paper2, self.paper3],
+            )
+
+            self.assertEqual(mock_gemini.call_count, 1)
+            self.assertIn("gap_analysis", result)
+            gap = result["gap_analysis"]
+
+            self.assertEqual(gap["overall_assessment"], "Comprehensive gap assessment across 3 papers.")
+            self.assertEqual(len(gap["common_limitations"]), 1)
+            self.assertEqual(gap["common_limitations"][0]["statement"], "Sample size is small.")
+            self.assertEqual(len(gap["common_limitations"][0]["sources"]), 1)
+            self.assertEqual(gap["common_limitations"][0]["sources"][0]["chunk_id"], self.chunk1.id)
+            self.assertEqual(gap["common_limitations"][0]["sources"][0]["page_number"], 5)
+
+            self.assertEqual(len(gap["methodological_gaps"]), 1)
+            self.assertEqual(len(gap["dataset_population_gaps"]), 1)
+            self.assertEqual(len(gap["understudied_areas"]), 1)
+            self.assertEqual(len(gap["contradictions_inconsistencies"]), 1)
+            self.assertEqual(len(gap["unanswered_research_questions"]), 1)
+            self.assertEqual(gap["unanswered_research_questions"][0]["question"], "How does this method scale to 10M parameters?")
+            self.assertEqual(len(gap["future_research_directions"]), 1)
+            self.assertEqual(gap["future_research_directions"][0]["direction"], "Test against cross-continental datasets.")
+
+    def test_malformed_gemini_json_graceful_fallback(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_research_gap_analysis
+
+        mock_gemini_response = MagicMock()
+        mock_gemini_response.text = "This is not valid json! {broken"
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_gemini_response):
+
+            result = generate_research_gap_analysis(
+                question="Analyze gaps",
+                papers=[self.paper1, self.paper2],
+            )
+
+            gap = result["gap_analysis"]
+            self.assertEqual(gap["overall_assessment"], "Assessment unavailable based on the provided evidence.")
+            self.assertEqual(gap["common_limitations"], [])
+            self.assertEqual(gap["methodological_gaps"], [])
+            self.assertEqual(gap["dataset_population_gaps"], [])
+            self.assertEqual(gap["understudied_areas"], [])
+            self.assertEqual(gap["contradictions_inconsistencies"], [])
+            self.assertEqual(gap["unanswered_research_questions"], [])
+            self.assertEqual(gap["future_research_directions"], [])
+
+    def test_missing_optional_sections_normalized(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_research_gap_analysis
+
+        mock_gemini_response = MagicMock()
+        mock_gemini_response.text = """{
+            "overall_assessment": "Partial assessment.",
+            "common_limitations": [
+                {
+                    "statement": "Hardware constraints.",
+                    "source_refs": []
+                }
+            ]
+        }"""
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_gemini_response):
+
+            result = generate_research_gap_analysis(
+                question="Gaps",
+                papers=[self.paper1, self.paper2],
+            )
+
+            gap = result["gap_analysis"]
+            self.assertEqual(gap["overall_assessment"], "Partial assessment.")
+            self.assertEqual(len(gap["common_limitations"]), 1)
+            self.assertEqual(gap["methodological_gaps"], [])
+            self.assertEqual(gap["dataset_population_gaps"], [])
+            self.assertEqual(gap["understudied_areas"], [])
+            self.assertEqual(gap["contradictions_inconsistencies"], [])
+            self.assertEqual(gap["unanswered_research_questions"], [])
+            self.assertEqual(gap["future_research_directions"], [])
+
+    def test_invalid_source_references_filtered_out(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_research_gap_analysis
+
+        mock_gemini_response = MagicMock()
+        mock_gemini_response.text = f"""{{
+            "overall_assessment": "Gaps with fabricated chunk ids.",
+            "common_limitations": [
+                {{
+                    "statement": "Fabricated chunk test.",
+                    "source_refs": [
+                        {{"paper_id": {self.paper1.id}, "chunk_id": 999999}},
+                        {{"paper_id": {self.paper1.id}, "chunk_id": {self.chunk1.id}}}
+                    ]
+                }}
+            ],
+            "methodological_gaps": [],
+            "dataset_population_gaps": [],
+            "understudied_areas": [],
+            "contradictions_inconsistencies": [],
+            "unanswered_research_questions": [],
+            "future_research_directions": []
+        }}"""
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_gemini_response):
+
+            result = generate_research_gap_analysis(
+                question="Gaps",
+                papers=[self.paper1, self.paper2],
+            )
+
+            sources = result["gap_analysis"]["common_limitations"][0]["sources"]
+            # 999999 should be filtered out, only chunk1 should remain
+            self.assertEqual(len(sources), 1)
+            self.assertEqual(sources[0]["chunk_id"], self.chunk1.id)
+
+    def test_cross_paper_unretrieved_source_references(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_research_gap_analysis
+
+        # Paper 4 has chunk 4, but we only analyze paper 1 and paper 2
+        mock_gemini_response = MagicMock()
+        mock_gemini_response.text = f"""{{
+            "overall_assessment": "Cross paper invalid ref test.",
+            "common_limitations": [
+                {{
+                    "statement": "Mismatched paper and unretrieved chunk.",
+                    "source_refs": [
+                        {{"paper_id": {self.paper2.id}, "chunk_id": {self.chunk1.id}}},
+                        {{"paper_id": {self.paper4.id}, "chunk_id": {self.chunk4.id}}}
+                    ]
+                }}
+            ],
+            "methodological_gaps": [],
+            "dataset_population_gaps": [],
+            "understudied_areas": [],
+            "contradictions_inconsistencies": [],
+            "unanswered_research_questions": [],
+            "future_research_directions": []
+        }}"""
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_gemini_response):
+
+            result = generate_research_gap_analysis(
+                question="Gaps",
+                papers=[self.paper1, self.paper2],
+            )
+
+            sources = result["gap_analysis"]["common_limitations"][0]["sources"]
+            # chunk1 belongs to paper1, but ref specified paper2 -> filtered out
+            # chunk4 belongs to paper4, which was not retrieved -> filtered out
+            self.assertEqual(len(sources), 0)
+
+    def test_page_number_preservation(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_research_gap_analysis
+
+        mock_gemini_response = MagicMock()
+        mock_gemini_response.text = f"""{{
+            "overall_assessment": "Page check.",
+            "common_limitations": [
+                {{
+                    "statement": "Page verification.",
+                    "source_refs": [
+                        {{"paper_id": {self.paper1.id}, "chunk_id": {self.chunk1.id}}},
+                        {{"paper_id": {self.paper2.id}, "chunk_id": {self.chunk2.id}}}
+                    ]
+                }}
+            ],
+            "methodological_gaps": [],
+            "dataset_population_gaps": [],
+            "understudied_areas": [],
+            "contradictions_inconsistencies": [],
+            "unanswered_research_questions": [],
+            "future_research_directions": []
+        }}"""
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_gemini_response):
+
+            result = generate_research_gap_analysis(
+                question="Gaps",
+                papers=[self.paper1, self.paper2],
+            )
+
+            sources = result["gap_analysis"]["common_limitations"][0]["sources"]
+            self.assertEqual(len(sources), 2)
+            self.assertEqual(sources[0]["page_number"], 5)
+            self.assertEqual(sources[1]["page_number"], 12)
+
+    def test_one_gemini_synthesis_call_only(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_research_gap_analysis
+
+        mock_gemini_response = MagicMock()
+        mock_gemini_response.text = '{"overall_assessment": "One call."}'
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_gemini_response) as mock_gemini:
+
+            generate_research_gap_analysis(
+                question="Analyze gaps",
+                papers=[self.paper1, self.paper2],
+            )
+
+            self.assertEqual(mock_gemini.call_count, 1)
+
+    def test_two_paper_analysis_boundary(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_research_gap_analysis
+
+        mock_gemini_response = MagicMock()
+        mock_gemini_response.text = '{"overall_assessment": "Two papers evaluated."}'
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_gemini_response):
+
+            result = generate_research_gap_analysis(
+                question="Analyze gaps",
+                papers=[self.paper1, self.paper2],
+            )
+
+            self.assertEqual(len(result["papers"]), 2)
+            self.assertEqual(result["gap_analysis"]["overall_assessment"], "Two papers evaluated.")
+
+    def test_four_paper_analysis_boundary(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_research_gap_analysis
+
+        mock_gemini_response = MagicMock()
+        mock_gemini_response.text = '{"overall_assessment": "Four papers evaluated."}'
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_gemini_response):
+
+            result = generate_research_gap_analysis(
+                question="Analyze gaps",
+                papers=[self.paper1, self.paper2, self.paper3, self.paper4],
+            )
+
+            self.assertEqual(len(result["papers"]), 4)
+            self.assertEqual(result["gap_analysis"]["overall_assessment"], "Four papers evaluated.")
+
+    def test_empty_retrieval_evidence_behavior(self):
+        from unittest.mock import patch
+        from ai.services import generate_research_gap_analysis
+
+        empty_paper_a = Paper.objects.create(project=self.project, title="Empty Paper A")
+        empty_paper_b = Paper.objects.create(project=self.project, title="Empty Paper B")
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini") as mock_gemini:
+
+            result = generate_research_gap_analysis(
+                question="Analyze gaps",
+                papers=[empty_paper_a, empty_paper_b],
+            )
+
+            # Gemini must NOT be called when chunks are empty
+            self.assertEqual(mock_gemini.call_count, 0)
+            self.assertIn("Insufficient text content", result["gap_analysis"]["overall_assessment"])
+            self.assertEqual(result["gap_analysis"]["common_limitations"], [])
+            self.assertEqual(result["gap_analysis"]["methodological_gaps"], [])
+
+    def test_paper_count_validation(self):
+        from ai.services import generate_research_gap_analysis
+
+        # 1 paper: invalid
+        with self.assertRaises(ValueError) as ctx:
+            generate_research_gap_analysis("Gaps", [self.paper1])
+        self.assertIn("requires between 2 and 4 papers", str(ctx.exception))
+
+        # 5 papers: invalid
+        paper5 = Paper.objects.create(project=self.project, title="Paper Epsilon")
+        with self.assertRaises(ValueError) as ctx:
+            generate_research_gap_analysis("Gaps", [self.paper1, self.paper2, self.paper3, self.paper4, paper5])
+        self.assertIn("requires between 2 and 4 papers", str(ctx.exception))
+
+        # Non-paper item: invalid
+        with self.assertRaises(ValueError) as ctx:
+            generate_research_gap_analysis("Gaps", [self.paper1, "invalid_paper"])
+        self.assertIn("must be a valid Paper instance", str(ctx.exception))
+
+    def test_parse_research_gap_analysis_json_code_fences(self):
+        from ai.services import parse_research_gap_analysis_json
+
+        fenced_input = """```json
+        {
+            "overall_assessment": "Fenced analysis.",
+            "common_limitations": [{"statement": "Fenced limitation"}]
+        }
+        ```"""
+        parsed = parse_research_gap_analysis_json(fenced_input)
+        self.assertEqual(parsed["overall_assessment"], "Fenced analysis.")
+        self.assertEqual(len(parsed["common_limitations"]), 1)
+
+
+class ResearchGapAnalysisAPITests(TestCase):
+    """
+    Focused API tests for Phase 7.1.2: Research Gap Analysis REST API endpoint
+    POST /api/ai/gap-analysis/
+    Verifies authentication, paper bounds, duplicates, ownership, cross-project checks,
+    optional session validation, non-persistence, default questions, and error handling.
+    """
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+        self.client = APIClient()
+
+        self.user1 = User.objects.create_user(username="gap_api_user1", password="password")
+        self.user2 = User.objects.create_user(username="gap_api_user2", password="password")
+
+        self.proj1 = Project.objects.create(owner=self.user1, title="User1 Project")
+        self.proj2 = Project.objects.create(owner=self.user2, title="User2 Project")
+
+        self.paper1 = Paper.objects.create(project=self.proj1, title="Paper Alpha")
+        self.paper2 = Paper.objects.create(project=self.proj1, title="Paper Beta")
+        self.paper3 = Paper.objects.create(project=self.proj1, title="Paper Gamma")
+        self.paper4 = Paper.objects.create(project=self.proj1, title="Paper Delta")
+        self.paper5 = Paper.objects.create(project=self.proj1, title="Paper Epsilon")
+
+        self.other_paper = Paper.objects.create(project=self.proj2, title="Other User Paper")
+
+        self.session1 = ResearchSession.objects.create(project=self.proj1, title="Session 1")
+        self.session2 = ResearchSession.objects.create(project=self.proj2, title="Session 2")
+
+        self.chunk1 = PaperChunk.objects.create(
+            paper=self.paper1,
+            chunk_index=0,
+            page_number=3,
+            text="Paper Alpha chunk text",
+            embedding=[0.1] * 384
+        )
+        self.chunk2 = PaperChunk.objects.create(
+            paper=self.paper2,
+            chunk_index=0,
+            page_number=7,
+            text="Paper Beta chunk text",
+            embedding=[0.2] * 384
+        )
+
+        self.mock_gap_response = {
+            "question": "What research gaps exist across these papers?",
+            "papers": [
+                {"paper_id": self.paper1.id, "title": self.paper1.title},
+                {"paper_id": self.paper2.id, "title": self.paper2.title}
+            ],
+            "gap_analysis": {
+                "overall_assessment": "Grounded research gaps across papers.",
+                "common_limitations": [
+                    {"statement": "Limited sample size.", "sources": []}
+                ],
+                "methodological_gaps": [],
+                "dataset_population_gaps": [],
+                "understudied_areas": [],
+                "contradictions_inconsistencies": [],
+                "unanswered_research_questions": [],
+                "future_research_directions": []
+            }
+        }
+
+    def test_successful_2_paper_analysis(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+
+        with patch("ai.views.generate_research_gap_analysis", return_value=self.mock_gap_response):
+            resp = self.client.post("/api/ai/gap-analysis/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+                "question": "What research gaps exist across these papers?"
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            self.assertEqual(len(data["papers"]), 2)
+            self.assertEqual(data["gap_analysis"]["overall_assessment"], "Grounded research gaps across papers.")
+            self.assertEqual(data["question"], "What research gaps exist across these papers?")
+
+    def test_successful_4_paper_analysis(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+
+        four_paper_resp = {
+            "question": "Analyze gaps",
+            "papers": [
+                {"paper_id": self.paper1.id, "title": self.paper1.title},
+                {"paper_id": self.paper2.id, "title": self.paper2.title},
+                {"paper_id": self.paper3.id, "title": self.paper3.title},
+                {"paper_id": self.paper4.id, "title": self.paper4.title},
+            ],
+            "gap_analysis": {"overall_assessment": "Four papers evaluated."}
+        }
+
+        with patch("ai.views.generate_research_gap_analysis", return_value=four_paper_resp):
+            resp = self.client.post("/api/ai/gap-analysis/", {
+                "paper_ids": [self.paper1.id, self.paper2.id, self.paper3.id, self.paper4.id]
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(len(resp.json()["papers"]), 4)
+
+    def test_missing_paper_ids_returns_400(self):
+        self.client.force_authenticate(user=self.user1)
+        resp = self.client.post("/api/ai/gap-analysis/", {}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()["code"], "BAD_REQUEST")
+
+    def test_paper_ids_not_a_list_returns_400(self):
+        self.client.force_authenticate(user=self.user1)
+        resp = self.client.post("/api/ai/gap-analysis/", {"paper_ids": "not-a-list"}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json()["code"], "BAD_REQUEST")
+
+    def test_fewer_than_2_papers_returns_400(self):
+        self.client.force_authenticate(user=self.user1)
+        resp_empty = self.client.post("/api/ai/gap-analysis/", {"paper_ids": []}, format="json")
+        self.assertEqual(resp_empty.status_code, 400)
+
+        resp_single = self.client.post("/api/ai/gap-analysis/", {"paper_ids": [self.paper1.id]}, format="json")
+        self.assertEqual(resp_single.status_code, 400)
+        self.assertIn("requires between 2 and 4 papers", resp_single.json()["error"])
+
+    def test_more_than_4_papers_returns_400(self):
+        self.client.force_authenticate(user=self.user1)
+        resp = self.client.post("/api/ai/gap-analysis/", {
+            "paper_ids": [self.paper1.id, self.paper2.id, self.paper3.id, self.paper4.id, self.paper5.id]
+        }, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("requires between 2 and 4 papers", resp.json()["error"])
+
+    def test_duplicate_paper_ids_returns_400(self):
+        self.client.force_authenticate(user=self.user1)
+        resp = self.client.post("/api/ai/gap-analysis/", {
+            "paper_ids": [self.paper1.id, self.paper1.id]
+        }, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("Duplicate paper IDs", resp.json()["error"])
+
+    def test_paper_ids_non_integer_elements_returns_400(self):
+        self.client.force_authenticate(user=self.user1)
+        resp_str = self.client.post("/api/ai/gap-analysis/", {
+            "paper_ids": [self.paper1.id, "string_id"]
+        }, format="json")
+        self.assertEqual(resp_str.status_code, 400)
+
+        resp_bool = self.client.post("/api/ai/gap-analysis/", {
+            "paper_ids": [self.paper1.id, True]
+        }, format="json")
+        self.assertEqual(resp_bool.status_code, 400)
+
+    def test_nonexistent_paper_id_returns_404(self):
+        self.client.force_authenticate(user=self.user1)
+        resp = self.client.post("/api/ai/gap-analysis/", {
+            "paper_ids": [self.paper1.id, 999999]
+        }, format="json")
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.json()["code"], "NOT_FOUND")
+
+    def test_unauthenticated_request_returns_401(self):
+        resp = self.client.post("/api/ai/gap-analysis/", {
+            "paper_ids": [self.paper1.id, self.paper2.id]
+        }, format="json")
+        self.assertEqual(resp.status_code, 401)
+
+    def test_unauthorized_cross_project_paper_returns_403(self):
+        self.client.force_authenticate(user=self.user1)
+        resp = self.client.post("/api/ai/gap-analysis/", {
+            "paper_ids": [self.paper1.id, self.other_paper.id]
+        }, format="json")
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()["code"], "FORBIDDEN")
+
+    def test_unauthorized_session_returns_403(self):
+        self.client.force_authenticate(user=self.user1)
+        resp = self.client.post("/api/ai/gap-analysis/", {
+            "paper_ids": [self.paper1.id, self.paper2.id],
+            "session_id": self.session2.id
+        }, format="json")
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()["code"], "FORBIDDEN")
+
+    def test_cross_project_paper_with_valid_session_returns_400(self):
+        self.client.force_authenticate(user=self.user1)
+        # Create second project for user1
+        proj1_b = Project.objects.create(owner=self.user1, title="User1 Project B")
+        paper_1b = Paper.objects.create(project=proj1_b, title="Project B Paper")
+
+        resp = self.client.post("/api/ai/gap-analysis/", {
+            "paper_ids": [self.paper1.id, paper_1b.id],
+            "session_id": self.session1.id
+        }, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("do not belong to this research session", resp.json()["error"])
+
+    def test_blank_question_uses_default_question(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+
+        expected_default = (
+            "Identify the major research gaps, limitations, unanswered questions, "
+            "and future research directions across these papers."
+        )
+
+        with patch("ai.views.generate_research_gap_analysis", return_value=self.mock_gap_response) as mock_service:
+            resp = self.client.post("/api/ai/gap-analysis/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+                "question": "   "
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            mock_service.assert_called_once()
+            called_question = mock_service.call_args.kwargs["question"]
+            self.assertEqual(called_question, expected_default)
+
+    def test_custom_question_passed_to_service(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+
+        custom_q = "What are the specific dataset biases between these papers?"
+
+        with patch("ai.views.generate_research_gap_analysis", return_value=self.mock_gap_response) as mock_service:
+            resp = self.client.post("/api/ai/gap-analysis/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+                "question": custom_q
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            mock_service.assert_called_once()
+            called_question = mock_service.call_args.kwargs["question"]
+            self.assertEqual(called_question, custom_q)
+
+    def test_service_called_with_exact_validated_papers(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+
+        with patch("ai.views.generate_research_gap_analysis", return_value=self.mock_gap_response) as mock_service:
+            # Send in reverse order [paper2, paper1]
+            resp = self.client.post("/api/ai/gap-analysis/", {
+                "paper_ids": [self.paper2.id, self.paper1.id]
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            mock_service.assert_called_once()
+            called_papers = mock_service.call_args.kwargs["papers"]
+            self.assertEqual(called_papers, [self.paper2, self.paper1])
+
+    def test_service_failure_maps_to_appropriate_api_errors(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+        from ai.services import RateLimitError
+
+        # 429 RateLimitError
+        with patch("ai.views.generate_research_gap_analysis", side_effect=RateLimitError("Rate limit")):
+            resp = self.client.post("/api/ai/gap-analysis/", {
+                "paper_ids": [self.paper1.id, self.paper2.id]
+            }, format="json")
+            self.assertEqual(resp.status_code, 429)
+            self.assertEqual(resp.json()["code"], "RATE_LIMITED")
+
+        # 503 Unavailable
+        with patch("ai.views.generate_research_gap_analysis", side_effect=Exception("503 UNAVAILABLE")):
+            resp = self.client.post("/api/ai/gap-analysis/", {
+                "paper_ids": [self.paper1.id, self.paper2.id]
+            }, format="json")
+            self.assertEqual(resp.status_code, 503)
+            self.assertEqual(resp.json()["code"], "SERVICE_UNAVAILABLE")
+
+        # 400 ValueError
+        with patch("ai.views.generate_research_gap_analysis", side_effect=ValueError("Invalid paper parameters")):
+            resp = self.client.post("/api/ai/gap-analysis/", {
+                "paper_ids": [self.paper1.id, self.paper2.id]
+            }, format="json")
+            self.assertEqual(resp.status_code, 400)
+            self.assertEqual(resp.json()["code"], "BAD_REQUEST")
+
+    def test_endpoint_creates_research_message_records_when_session_id_provided(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+        from ai.models import ResearchMessage
+        import json
+
+        initial_msg_count = ResearchMessage.objects.filter(session=self.session1).count()
+
+        with patch("ai.views.generate_research_gap_analysis", return_value=self.mock_gap_response):
+            resp = self.client.post("/api/ai/gap-analysis/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+                "question": "What research gaps exist across these papers?",
+                "session_id": self.session1.id
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(ResearchMessage.objects.filter(session=self.session1).count(), initial_msg_count + 2)
+
+            user_msg = ResearchMessage.objects.filter(session=self.session1, role=ResearchMessage.ROLE_USER).last()
+            self.assertEqual(user_msg.content, "What research gaps exist across these papers?")
+
+            asst_msg = ResearchMessage.objects.filter(session=self.session1, role=ResearchMessage.ROLE_ASSISTANT).last()
+            parsed_content = json.loads(asst_msg.content)
+            self.assertEqual(parsed_content["overall_assessment"], "Grounded research gaps across papers.")
+
+    def test_endpoint_creates_research_evidence_records_with_deduplication(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+        from ai.models import ResearchEvidence, ResearchMessage
+
+        # Mock gap response with sources across multiple sections, including a duplicate source
+        source_p1 = {
+            "chunk_id": self.chunk1.id,
+            "paper_id": self.paper1.id,
+            "page_number": 3,
+            "text": "Paper Alpha chunk text",
+        }
+        source_p2 = {
+            "chunk_id": self.chunk2.id,
+            "paper_id": self.paper2.id,
+            "page_number": 7,
+            "text": "Paper Beta chunk text",
+        }
+
+        mock_gap = {
+            "question": "Gap analysis question",
+            "papers": [
+                {"paper_id": self.paper1.id, "title": self.paper1.title},
+                {"paper_id": self.paper2.id, "title": self.paper2.title}
+            ],
+            "gap_analysis": {
+                "overall_assessment": "Grounded gaps.",
+                "common_limitations": [
+                    {"statement": "Small sample size.", "sources": [source_p1]}
+                ],
+                "methodological_gaps": [
+                    # Include source_p1 again (duplicate) and source_p2
+                    {"statement": "No cross-validation.", "sources": [source_p1, source_p2]}
+                ],
+                "dataset_population_gaps": [],
+                "understudied_areas": [],
+                "contradictions_inconsistencies": [],
+                "unanswered_research_questions": [],
+                "future_research_directions": []
+            }
+        }
+
+        with patch("ai.views.generate_research_gap_analysis", return_value=mock_gap):
+            resp = self.client.post("/api/ai/gap-analysis/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+                "session_id": self.session1.id
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+
+            asst_msg = ResearchMessage.objects.filter(session=self.session1, role=ResearchMessage.ROLE_ASSISTANT).last()
+            evidence_records = ResearchEvidence.objects.filter(message=asst_msg)
+
+            # Exactly 2 unique evidence records should be created (source_p1 deduplicated)
+            self.assertEqual(evidence_records.count(), 2)
+
+            evidence_chunk_ids = set(evidence_records.values_list("chunk_id", flat=True))
+            self.assertIn(self.chunk1.id, evidence_chunk_ids)
+            self.assertIn(self.chunk2.id, evidence_chunk_ids)
+
+            ev_p1 = evidence_records.get(chunk=self.chunk1)
+            self.assertEqual(ev_p1.paper, self.paper1)
+            self.assertEqual(ev_p1.page_number, 3)
+            self.assertEqual(ev_p1.text, "Paper Alpha chunk text")
+
+    def test_endpoint_does_not_create_records_when_no_session_id(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+        from ai.models import ResearchMessage, ResearchEvidence
+
+        initial_msg_count = ResearchMessage.objects.count()
+        initial_ev_count = ResearchEvidence.objects.count()
+
+        with patch("ai.views.generate_research_gap_analysis", return_value=self.mock_gap_response):
+            resp = self.client.post("/api/ai/gap-analysis/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(ResearchMessage.objects.count(), initial_msg_count)
+            self.assertEqual(ResearchEvidence.objects.count(), initial_ev_count)
+
+    def test_session_persistence_atomic_rollback_on_service_exception(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+        from ai.models import ResearchMessage, ResearchEvidence
+
+        initial_msg_count = ResearchMessage.objects.filter(session=self.session1).count()
+        initial_ev_count = ResearchEvidence.objects.count()
+
+        with patch("ai.views.generate_research_gap_analysis", side_effect=Exception("Service exploded")):
+            resp = self.client.post("/api/ai/gap-analysis/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+                "session_id": self.session1.id
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 500)
+            # Transaction must have rolled back - 0 new messages or evidence
+            self.assertEqual(ResearchMessage.objects.filter(session=self.session1).count(), initial_msg_count)
+            self.assertEqual(ResearchEvidence.objects.count(), initial_ev_count)
+
+    def test_reconstructed_from_session_detail_endpoint(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+        import json
+
+        source_p1 = {
+            "chunk_id": self.chunk1.id,
+            "paper_id": self.paper1.id,
+            "page_number": 3,
+            "text": "Paper Alpha chunk text",
+        }
+        mock_gap = {
+            "question": "Assess research gaps across papers",
+            "papers": [
+                {"paper_id": self.paper1.id, "title": self.paper1.title},
+                {"paper_id": self.paper2.id, "title": self.paper2.title}
+            ],
+            "gap_analysis": {
+                "overall_assessment": "Assessment of research gaps.",
+                "common_limitations": [
+                    {"statement": "Limited sample size.", "sources": [source_p1]}
+                ],
+                "methodological_gaps": [],
+                "dataset_population_gaps": [],
+                "understudied_areas": [],
+                "contradictions_inconsistencies": [],
+                "unanswered_research_questions": [],
+                "future_research_directions": []
+            }
+        }
+
+        with patch("ai.views.generate_research_gap_analysis", return_value=mock_gap):
+            post_resp = self.client.post("/api/ai/gap-analysis/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+                "question": "Assess research gaps across papers",
+                "session_id": self.session1.id
+            }, format="json")
+            self.assertEqual(post_resp.status_code, 200)
+
+        # Now fetch session via GET /api/ai/sessions/<id>/
+        get_resp = self.client.get(f"/api/ai/sessions/{self.session1.id}/")
+        self.assertEqual(get_resp.status_code, 200)
+        data = get_resp.json()
+
+        messages = data.get("messages", [])
+        self.assertGreaterEqual(len(messages), 2)
+        user_msg = messages[-2]
+        asst_msg = messages[-1]
+
+        self.assertEqual(user_msg["role"], "USER")
+        self.assertEqual(user_msg["content"], "Assess research gaps across papers")
+
+        self.assertEqual(asst_msg["role"], "ASSISTANT")
+        parsed = json.loads(asst_msg["content"])
+        self.assertEqual(parsed["overall_assessment"], "Assessment of research gaps.")
+        self.assertEqual(parsed["common_limitations"][0]["statement"], "Limited sample size.")
+
+        # Check evidence attached to assistant message
+        evidence = asst_msg.get("evidence", [])
+        self.assertEqual(len(evidence), 1)
+        self.assertEqual(evidence[0]["paper_id"], self.paper1.id)
+        self.assertEqual(evidence[0]["chunk_id"], self.chunk1.id)
+        self.assertEqual(evidence[0]["page_number"], 3)
+        self.assertEqual(evidence[0]["text"], "Paper Alpha chunk text")
+
+    def test_session_id_is_optional(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+
+        # Without session_id
+        with patch("ai.views.generate_research_gap_analysis", return_value=dict(self.mock_gap_response)):
+            resp_without = self.client.post("/api/ai/gap-analysis/", {
+                "paper_ids": [self.paper1.id, self.paper2.id]
+            }, format="json")
+            self.assertEqual(resp_without.status_code, 200)
+            self.assertNotIn("session_id", resp_without.json())
+
+        # With session_id
+        with patch("ai.views.generate_research_gap_analysis", return_value=dict(self.mock_gap_response)):
+            resp_with = self.client.post("/api/ai/gap-analysis/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+                "session_id": self.session1.id
+            }, format="json")
+            self.assertEqual(resp_with.status_code, 200)
+            self.assertEqual(resp_with.json().get("session_id"), self.session1.id)
+
+    def test_exactly_one_service_invocation_per_successful_request(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+
+        with patch("ai.views.generate_research_gap_analysis", return_value=self.mock_gap_response) as mock_service:
+            resp = self.client.post("/api/ai/gap-analysis/", {
+                "paper_ids": [self.paper1.id, self.paper2.id]
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(mock_service.call_count, 1)
+
+    def test_nonexistent_or_invalid_session_id_returns_404(self):
+        self.client.force_authenticate(user=self.user1)
+
+        resp_nonexistent = self.client.post("/api/ai/gap-analysis/", {
+            "paper_ids": [self.paper1.id, self.paper2.id],
+            "session_id": 999999
+        }, format="json")
+        self.assertEqual(resp_nonexistent.status_code, 404)
+        self.assertEqual(resp_nonexistent.json()["code"], "NOT_FOUND")
+
+        resp_invalid_str = self.client.post("/api/ai/gap-analysis/", {
+            "paper_ids": [self.paper1.id, self.paper2.id],
+            "session_id": "not-an-id"
+        }, format="json")
+        self.assertEqual(resp_invalid_str.status_code, 404)
+
+
 
 
 

@@ -1147,4 +1147,312 @@ Source Excerpts:
             "findings_comparison": findings_comp,
             "research_gaps": research_gaps,
         },
-    }
+    }
+
+
+def parse_research_gap_analysis_json(text):
+    """
+    Parse JSON from Gemini research gap analysis response text.
+    Handles Markdown code fences (```json) safely and normalizes
+    missing or malformed categories into safe defaults and lists.
+    """
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned)
+        cleaned = re.sub(r'\s*```$', '', cleaned)
+
+    try:
+        data = json.loads(cleaned)
+    except Exception as err:
+        print(f"Failed to parse research gap analysis JSON: {err}")
+        data = {}
+
+    if not isinstance(data, dict):
+        data = {}
+
+    return {
+        "overall_assessment": data.get("overall_assessment") or "Assessment unavailable based on the provided evidence.",
+        "common_limitations": data.get("common_limitations") if isinstance(data.get("common_limitations"), list) else [],
+        "methodological_gaps": data.get("methodological_gaps") if isinstance(data.get("methodological_gaps"), list) else [],
+        "dataset_population_gaps": data.get("dataset_population_gaps") if isinstance(data.get("dataset_population_gaps"), list) else [],
+        "understudied_areas": data.get("understudied_areas") if isinstance(data.get("understudied_areas"), list) else [],
+        "contradictions_inconsistencies": data.get("contradictions_inconsistencies") if isinstance(data.get("contradictions_inconsistencies"), list) else [],
+        "unanswered_research_questions": data.get("unanswered_research_questions") if isinstance(data.get("unanswered_research_questions"), list) else [],
+        "future_research_directions": data.get("future_research_directions") if isinstance(data.get("future_research_directions"), list) else [],
+    }
+
+
+def generate_research_gap_analysis(question, papers):
+    """
+    Perform single-call Gemini multi-paper Research Gap Analysis.
+
+    1. Validates paper count (2 to 4 papers required).
+    2. Calls local retrieve_multi_paper_evidence() to retrieve top evidence chunks.
+    3. Builds a bounded prompt context with strict grounding rules.
+    4. Makes EXACTLY ONE Gemini API call.
+    5. Validates and resolves returned source_refs against actual DB PaperChunk instances.
+    6. Returns structured gap analysis JSON conforming to Phase 7.1 schema.
+    """
+    from papers.models import Paper
+
+    if not papers:
+        raise ValueError("papers must be a non-empty list of Paper instances.")
+
+    papers_list = list(papers)
+
+    if len(papers_list) < 2 or len(papers_list) > 4:
+        raise ValueError("Research gap analysis requires between 2 and 4 papers.")
+
+    for p in papers_list:
+        if not isinstance(p, Paper):
+            raise ValueError("Each item in papers must be a valid Paper instance.")
+
+    # Formulate query text (0 Gemini calls)
+    query_text = (
+        question.strip()
+        if (question and isinstance(question, str) and question.strip())
+        else "research gaps limitations methodological weaknesses dataset constraints unanswered questions future directions"
+    )
+
+    # 1. Retrieve local evidence chunks across 2-4 papers (0 Gemini calls)
+    retrieved_groups = retrieve_multi_paper_evidence(
+        question=query_text,
+        papers=papers_list,
+        top_k_per_paper=5,
+    )
+
+    # Check for empty evidence across all papers
+    total_chunks = sum(len(group["sources"]) for group in retrieved_groups)
+    if total_chunks == 0:
+        empty_gap_data = {
+            "overall_assessment": "Insufficient text content found across the selected papers to identify research gaps.",
+            "common_limitations": [],
+            "methodological_gaps": [],
+            "dataset_population_gaps": [],
+            "understudied_areas": [],
+            "contradictions_inconsistencies": [],
+            "unanswered_research_questions": [],
+            "future_research_directions": [],
+        }
+        return {
+            "question": query_text,
+            "papers": [{"paper_id": p.id, "title": p.title} for p in papers_list],
+            "gap_analysis": empty_gap_data,
+            **empty_gap_data,
+        }
+
+    # Fetch DB PaperChunk objects to resolve and verify source_refs against real DB records
+    chunk_ids = [
+        source["chunk_id"]
+        for group in retrieved_groups
+        for source in group["sources"]
+    ]
+    db_chunks = PaperChunk.objects.filter(id__in=chunk_ids).select_related("paper")
+    valid_chunk_map = {chunk.id: chunk for chunk in db_chunks}
+
+    # Build prompt context with exact paper and chunk references
+    context_blocks = []
+    for group in retrieved_groups:
+        paper_block = [f"PAPER ID: {group['paper_id']}\nTitle: {group['paper_title']}"]
+        for s in group["sources"]:
+            page_str = f"Page: {s['page_number']}" if s.get("page_number") else "Page: 1"
+            paper_block.append(f"SOURCE (Chunk ID: {s['chunk_id']}, {page_str}):\n{s['text']}")
+        context_blocks.append("\n\n".join(paper_block))
+
+    combined_context = "\n\n---\n\n".join(context_blocks)
+    paper_titles_str = ", ".join([f"'{p.title}' (ID: {p.id})" for p in papers_list])
+
+    prompt = f"""You are an expert academic research gap analyst specializing in identifying limitations, literature gaps, and future research directions across scientific literature.
+
+Analyze the following research papers: {paper_titles_str}
+
+Research Gap Query / Focus: {query_text}
+
+Use ONLY the provided paper source excerpts to evaluate research gaps, limitations, and future directions.
+
+Distinctions to strictly observe:
+- "common_limitations": Limitations explicitly identified and acknowledged in the papers (e.g. sample size, methodological constraints, hardware, threats to validity).
+- "methodological_gaps": Methodological weaknesses, missing controls, lack of longitudinal evaluation, or unvalidated assumptions supported by the excerpts.
+- "dataset_population_gaps": Missing datasets, underrepresented populations, geographic/demographic limits, or sample constraints supported by the evidence.
+- "understudied_areas": Specific problem facets, edge cases, or sub-domains insufficiently explored across the selected literature.
+- "contradictions_inconsistencies": Conflicting findings, divergent conclusions, differing assumptions, or contradictory empirical results supported by evidence.
+- "unanswered_research_questions": Specific academic questions that remain open or unresolved based on the selected papers.
+- "future_research_directions": Concrete, promising future research avenues directly grounded in the identified gaps and limitations.
+
+Rules:
+- Base every single statement strictly on the supplied evidence excerpts.
+- Do NOT use outside knowledge, speculate without evidence, or invent unsupported claims.
+- Do NOT invent paper titles, paper IDs, chunk IDs, or page numbers.
+- For every substantive item, include "source_refs" referencing exact "paper_id" and "chunk_id" from the excerpts.
+- If a category has no evidence in the provided excerpts, return an empty array [] for that category.
+
+Return your response STRICTLY as a JSON object matching this schema:
+{{
+    "overall_assessment": "Comprehensive high-level synthesis of research gaps and limitations across the analyzed papers",
+    "common_limitations": [
+        {{
+            "statement": "Explicit limitation statement",
+            "source_refs": [
+                {{"paper_id": 1, "chunk_id": 101}}
+            ]
+        }}
+    ],
+    "methodological_gaps": [
+        {{
+            "statement": "Methodological gap statement",
+            "source_refs": [
+                {{"paper_id": 1, "chunk_id": 101}}
+            ]
+        }}
+    ],
+    "dataset_population_gaps": [
+        {{
+            "statement": "Dataset or population gap statement",
+            "source_refs": [
+                {{"paper_id": 1, "chunk_id": 101}}
+            ]
+        }}
+    ],
+    "understudied_areas": [
+        {{
+            "statement": "Understudied area statement",
+            "source_refs": [
+                {{"paper_id": 1, "chunk_id": 101}}
+            ]
+        }}
+    ],
+    "contradictions_inconsistencies": [
+        {{
+            "statement": "Contradiction or inconsistency statement",
+            "source_refs": [
+                {{"paper_id": 1, "chunk_id": 101}},
+                {{"paper_id": 2, "chunk_id": 201}}
+            ]
+        }}
+    ],
+    "unanswered_research_questions": [
+        {{
+            "question": "Unanswered research question",
+            "source_refs": [
+                {{"paper_id": 1, "chunk_id": 101}}
+            ]
+        }}
+    ],
+    "future_research_directions": [
+        {{
+            "direction": "Future research direction grounded in identified gaps",
+            "source_refs": [
+                {{"paper_id": 1, "chunk_id": 101}}
+            ]
+        }}
+    ]
+}}
+
+Source Excerpts:
+{combined_context}
+"""
+
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY is not configured.")
+
+    client = genai.Client(api_key=api_key)
+
+    # Single Gemini call limit (EXACTLY 1 request)
+    gemini_call_count = 1
+    print(f"[Research Gap Analysis] Making Gemini call #{gemini_call_count} (EXACTLY 1 request)")
+    response = _call_gemini(client, prompt, json_mode=True, feature_name="research_gap_analysis")
+
+    raw_parsed = parse_research_gap_analysis_json(response.text)
+
+    # Validate and resolve source_refs against DB PaperChunk map for each section
+    common_limitations = []
+    for item in raw_parsed["common_limitations"]:
+        if isinstance(item, dict) and (item.get("statement") or item.get("summary")):
+            stmt = item.get("statement") or item.get("summary")
+            sources = validate_and_resolve_source_refs(item.get("source_refs"), valid_chunk_map)
+            common_limitations.append({
+                "statement": stmt,
+                "sources": sources,
+            })
+
+    methodological_gaps = []
+    for item in raw_parsed["methodological_gaps"]:
+        if isinstance(item, dict) and (item.get("statement") or item.get("summary")):
+            stmt = item.get("statement") or item.get("summary")
+            sources = validate_and_resolve_source_refs(item.get("source_refs"), valid_chunk_map)
+            methodological_gaps.append({
+                "statement": stmt,
+                "sources": sources,
+            })
+
+    dataset_population_gaps = []
+    for item in raw_parsed["dataset_population_gaps"]:
+        if isinstance(item, dict) and (item.get("statement") or item.get("summary")):
+            stmt = item.get("statement") or item.get("summary")
+            sources = validate_and_resolve_source_refs(item.get("source_refs"), valid_chunk_map)
+            dataset_population_gaps.append({
+                "statement": stmt,
+                "sources": sources,
+            })
+
+    understudied_areas = []
+    for item in raw_parsed["understudied_areas"]:
+        if isinstance(item, dict) and (item.get("statement") or item.get("summary")):
+            stmt = item.get("statement") or item.get("summary")
+            sources = validate_and_resolve_source_refs(item.get("source_refs"), valid_chunk_map)
+            understudied_areas.append({
+                "statement": stmt,
+                "sources": sources,
+            })
+
+    contradictions_inconsistencies = []
+    for item in raw_parsed["contradictions_inconsistencies"]:
+        if isinstance(item, dict) and (item.get("statement") or item.get("summary")):
+            stmt = item.get("statement") or item.get("summary")
+            sources = validate_and_resolve_source_refs(item.get("source_refs"), valid_chunk_map)
+            contradictions_inconsistencies.append({
+                "statement": stmt,
+                "sources": sources,
+            })
+
+    unanswered_questions = []
+    for item in raw_parsed["unanswered_research_questions"]:
+        if isinstance(item, dict) and (item.get("question") or item.get("statement") or item.get("summary")):
+            q_text = item.get("question") or item.get("statement") or item.get("summary")
+            sources = validate_and_resolve_source_refs(item.get("source_refs"), valid_chunk_map)
+            unanswered_questions.append({
+                "question": q_text,
+                "sources": sources,
+            })
+
+    future_directions = []
+    for item in raw_parsed["future_research_directions"]:
+        if isinstance(item, dict) and (item.get("direction") or item.get("statement") or item.get("summary")):
+            d_text = item.get("direction") or item.get("statement") or item.get("summary")
+            sources = validate_and_resolve_source_refs(item.get("source_refs"), valid_chunk_map)
+            future_directions.append({
+                "direction": d_text,
+                "sources": sources,
+            })
+
+    print(f"[DIAGNOSTICS] Feature: research_gap_analysis | Gemini Calls: {gemini_call_count}")
+
+    gap_data = {
+        "overall_assessment": raw_parsed["overall_assessment"],
+        "common_limitations": common_limitations,
+        "methodological_gaps": methodological_gaps,
+        "dataset_population_gaps": dataset_population_gaps,
+        "understudied_areas": understudied_areas,
+        "contradictions_inconsistencies": contradictions_inconsistencies,
+        "unanswered_research_questions": unanswered_questions,
+        "future_research_directions": future_directions,
+    }
+
+    return {
+        "question": query_text,
+        "papers": [{"paper_id": p.id, "title": p.title} for p in papers_list],
+        "gap_analysis": gap_data,
+        **gap_data,
+    }
+

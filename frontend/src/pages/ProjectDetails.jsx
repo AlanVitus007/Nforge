@@ -26,6 +26,40 @@ function ProjectDetails() {
     const [selectionNotice, setSelectionNotice] = useState("");
     const [tempMessage, setTempMessage] = useState("");
 
+    // Rename project state
+    const [isEditingTitle, setIsEditingTitle] = useState(false);
+    const [editTitle, setEditTitle] = useState("");
+    const [isSavingTitle, setIsSavingTitle] = useState(false);
+    const [renameError, setRenameError] = useState("");
+
+    const handleSaveTitle = async () => {
+        const trimmed = editTitle.trim();
+        if (!trimmed) {
+            setRenameError("Project title cannot be empty.");
+            return;
+        }
+        if (trimmed === project.title) {
+            setIsEditingTitle(false);
+            setRenameError("");
+            return;
+        }
+        try {
+            setIsSavingTitle(true);
+            setRenameError("");
+            const response = await api.patch(`/projects/${id}/`, { title: trimmed });
+            setProject(response.data);
+            setIsEditingTitle(false);
+        } catch (err) {
+            setRenameError(
+                err.response?.data?.title?.[0] ||
+                err.response?.data?.detail ||
+                "Failed to update project title."
+            );
+        } finally {
+            setIsSavingTitle(false);
+        }
+    };
+
     const fetchProject = async () => {
         try {
             const response = await api.get(`/projects/${id}/`);
@@ -236,14 +270,129 @@ function ProjectDetails() {
 
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "3rem", flexWrap: "wrap", gap: "1rem" }}>
                 <div>
-                    <h1
-                        style={{
-                            fontSize: "2.5rem",
-                            marginBottom: "0.5rem",
-                        }}
-                    >
-                        {project.title}
-                    </h1>
+                    {!isEditingTitle ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.5rem", flexWrap: "wrap" }}>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setEditTitle(project.title);
+                                    setRenameError("");
+                                    setIsEditingTitle(true);
+                                }}
+                                title="Rename project"
+                                aria-label="Rename project"
+                                style={{
+                                    background: "transparent",
+                                    border: "1px solid transparent",
+                                    borderRadius: "var(--radius-sm, 6px)",
+                                    color: "var(--text-secondary)",
+                                    cursor: "pointer",
+                                    padding: "6px",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    transition: "all 0.15s ease",
+                                }}
+                                onMouseEnter={(e) => {
+                                    e.currentTarget.style.color = "var(--text-primary)";
+                                    e.currentTarget.style.backgroundColor = "var(--bg-surface-raised, rgba(255,255,255,0.08))";
+                                    e.currentTarget.style.borderColor = "var(--border-color, rgba(255,255,255,0.12))";
+                                }}
+                                onMouseLeave={(e) => {
+                                    e.currentTarget.style.color = "var(--text-secondary)";
+                                    e.currentTarget.style.backgroundColor = "transparent";
+                                    e.currentTarget.style.borderColor = "transparent";
+                                }}
+                            >
+                                <svg
+                                    width="20"
+                                    height="20"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    aria-hidden="true"
+                                >
+                                    <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+                                </svg>
+                            </button>
+
+                            <h1
+                                style={{
+                                    fontSize: "2.5rem",
+                                    margin: 0,
+                                    lineHeight: 1.2,
+                                }}
+                            >
+                                {project.title}
+                            </h1>
+                        </div>
+                    ) : (
+                        <div style={{ marginBottom: "0.75rem" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+                                <input
+                                    type="text"
+                                    value={editTitle}
+                                    onChange={(e) => {
+                                        setEditTitle(e.target.value);
+                                        if (renameError) setRenameError("");
+                                    }}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                            e.preventDefault();
+                                            handleSaveTitle();
+                                        }
+                                        if (e.key === "Escape") {
+                                            setIsEditingTitle(false);
+                                            setRenameError("");
+                                        }
+                                    }}
+                                    autoFocus
+                                    disabled={isSavingTitle}
+                                    style={{
+                                        fontSize: "1.75rem",
+                                        fontWeight: "700",
+                                        padding: "0.35rem 0.75rem",
+                                        borderRadius: "var(--radius-md, 8px)",
+                                        border: "1px solid var(--accent-primary, #6366f1)",
+                                        backgroundColor: "var(--bg-input, var(--bg-surface-raised, #1e2230))",
+                                        color: "var(--text-primary, #ffffff)",
+                                        outline: "none",
+                                        minWidth: "260px",
+                                        maxWidth: "600px",
+                                    }}
+                                />
+                                <div style={{ display: "flex", gap: "0.5rem" }}>
+                                    <Button
+                                        size="small"
+                                        variant="primary"
+                                        disabled={isSavingTitle || !editTitle.trim()}
+                                        onClick={handleSaveTitle}
+                                    >
+                                        {isSavingTitle ? "Saving..." : "Save"}
+                                    </Button>
+                                    <Button
+                                        size="small"
+                                        variant="secondary"
+                                        disabled={isSavingTitle}
+                                        onClick={() => {
+                                            setIsEditingTitle(false);
+                                            setRenameError("");
+                                        }}
+                                    >
+                                        Cancel
+                                    </Button>
+                                </div>
+                            </div>
+                            {renameError && (
+                                <div style={{ color: "var(--danger)", fontSize: "0.875rem", marginTop: "0.35rem" }}>
+                                    {renameError}
+                                </div>
+                            )}
+                        </div>
+                    )}
 
                     <p
                         style={{

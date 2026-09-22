@@ -100,6 +100,167 @@ function formatSessionTime(isoString) {
     }
 }
 
+/**
+ * Research prompt shortcuts for Single-Paper analysis.
+ */
+const SINGLE_PAPER_SHORTCUTS = [
+    {
+        label: 'Summarize this paper',
+        prompt: 'Summarize this paper and explain its main contribution.'
+    },
+    {
+        label: 'Explain the methodology',
+        prompt: 'Explain the methodology used in this paper, including the study design, data, methods, and evaluation approach.'
+    },
+    {
+        label: 'Identify key findings',
+        prompt: 'Identify the key findings and results reported in this paper.'
+    },
+    {
+        label: 'Identify limitations',
+        prompt: 'Identify the main limitations acknowledged or evident from this paper.'
+    },
+    {
+        label: 'Find research gaps',
+        prompt: 'Identify research gaps suggested by this paper.'
+    },
+    {
+        label: 'Suggest future research directions',
+        prompt: 'Suggest possible future research directions based on the gaps and limitations discussed in this paper.'
+    }
+];
+
+/**
+ * Helper to safely parse and detect structured multi-paper research gap analysis JSON.
+ * Accepts both parsed object and JSON string, and enriches evidence paper titles.
+ */
+function parseStructuredGapAnalysis(content, papers = []) {
+    let parsed = null;
+
+    if (content && typeof content === 'object') {
+        parsed = content;
+    } else if (typeof content === 'string') {
+        const trimmed = content.trim();
+        if (trimmed.startsWith('{') || trimmed.startsWith('```')) {
+            let jsonStr = trimmed;
+            if (jsonStr.startsWith('```')) {
+                jsonStr = jsonStr.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+            }
+            try {
+                parsed = JSON.parse(jsonStr);
+            } catch {
+                return null;
+            }
+        }
+    }
+
+    if (
+        parsed &&
+        typeof parsed === 'object' &&
+        (parsed.overall_assessment ||
+         Array.isArray(parsed.common_limitations) ||
+         Array.isArray(parsed.methodological_gaps) ||
+         Array.isArray(parsed.dataset_population_gaps) ||
+         Array.isArray(parsed.understudied_areas) ||
+         Array.isArray(parsed.contradictions_inconsistencies) ||
+         Array.isArray(parsed.unanswered_research_questions) ||
+         Array.isArray(parsed.future_research_directions))
+    ) {
+        // Enrich paper titles on sources if paper mapping is available
+        if (papers && papers.length > 0) {
+            const paperMap = {};
+            papers.forEach((p) => {
+                paperMap[p.id] = p.title;
+            });
+
+            const enrichSources = (list) => {
+                if (!Array.isArray(list)) return;
+                list.forEach((item) => {
+                    if (item && Array.isArray(item.sources)) {
+                        item.sources.forEach((src) => {
+                            if (src && !src.paper_title && src.paper_id && paperMap[src.paper_id]) {
+                                src.paper_title = paperMap[src.paper_id];
+                            }
+                        });
+                    }
+                });
+            };
+
+            enrichSources(parsed.common_limitations);
+            enrichSources(parsed.methodological_gaps);
+            enrichSources(parsed.dataset_population_gaps);
+            enrichSources(parsed.understudied_areas);
+            enrichSources(parsed.contradictions_inconsistencies);
+            enrichSources(parsed.unanswered_research_questions);
+            enrichSources(parsed.future_research_directions);
+        }
+        return parsed;
+    }
+    return null;
+}
+
+/**
+ * Research prompt shortcuts for Multi-Paper comparison.
+ */
+const COMPARISON_SHORTCUTS = [
+    {
+        label: 'Compare methodology',
+        prompt: 'Compare the methodology and study design used across these papers.'
+    },
+    {
+        label: 'Compare key findings',
+        prompt: 'Compare the key findings and results across these papers.'
+    },
+    {
+        label: 'Compare limitations',
+        prompt: 'Compare the limitations identified in these papers.'
+    },
+    {
+        label: 'Compare research gaps',
+        prompt: 'Compare the research gaps identified or implied by these papers.'
+    },
+    {
+        label: 'Compare study design',
+        prompt: 'Compare the study designs, datasets, and evaluation approaches used in these papers.'
+    },
+    {
+        label: 'Give an overall comparison',
+        prompt: 'Provide an overall comparison of the selected papers, including similarities, differences, methodology, findings, limitations, and research gaps.'
+    }
+];
+
+/**
+ * Research prompt shortcuts for Multi-Paper Research Gap Analysis.
+ */
+const RESEARCH_GAP_SHORTCUTS = [
+    {
+        label: 'Find research gaps',
+        prompt: 'Identify the major research gaps across these papers.'
+    },
+    {
+        label: 'Identify methodological gaps',
+        prompt: 'Identify the methodological gaps and study limitations across these papers.'
+    },
+    {
+        label: 'Find dataset/population gaps',
+        prompt: 'Identify dataset, sample size, or population gaps across these papers.'
+    },
+    {
+        label: 'Identify contradictions',
+        prompt: 'Identify contradictions or inconsistent findings across these papers.'
+    },
+    {
+        label: 'Find unanswered research questions',
+        prompt: 'Identify unanswered research questions and unexplored areas across these papers.'
+    },
+    {
+        label: 'Suggest future research directions',
+        prompt: 'Suggest promising future research directions based on the collective gaps of these papers.'
+    }
+];
+
+const DEFAULT_GAP_QUESTION = 'Identify the major research gaps, limitations, unanswered questions, and future research directions across these papers.';
+
 function ResearchWorkspace() {
     const { projectId } = useParams();
     const navigate = useNavigate();
@@ -131,6 +292,12 @@ function ResearchWorkspace() {
     const [comparisonQuestion, setComparisonQuestion] = useState('');
     const [loadingCompare, setLoadingCompare] = useState(false);
     const [compareError, setCompareError] = useState('');
+
+    // Live Multi-Paper Research Gap Analysis State
+    const [selectedGapPaperIds, setSelectedGapPaperIds] = useState([]);
+    const [gapQuestion, setGapQuestion] = useState('');
+    const [loadingGap, setLoadingGap] = useState(false);
+    const [gapError, setGapError] = useState('');
 
     // Loading & Action states
     const [loadingList, setLoadingList] = useState(true);
@@ -179,6 +346,8 @@ function ResearchWorkspace() {
             setQuestionText('');
             setCompareError('');
             setComparisonQuestion('');
+            setGapError('');
+            setGapQuestion('');
             setChatMode('ask');
 
             const res = await api.get(`/ai/sessions/${sessionId}/`);
@@ -194,9 +363,11 @@ function ResearchWorkspace() {
                 setSelectedPaperId(String(sessionData.papers[0].id));
                 const compPaperIds = sessionData.papers.slice(0, 4).map((p) => p.id);
                 setSelectedComparisonPaperIds(compPaperIds);
+                setSelectedGapPaperIds(compPaperIds);
             } else {
                 setSelectedPaperId('');
                 setSelectedComparisonPaperIds([]);
+                setSelectedGapPaperIds([]);
             }
         } catch (err) {
             if (currentSelectIdRef.current !== sessionId) return;
@@ -297,10 +468,13 @@ function ResearchWorkspace() {
             });
             setSelectedPaperId('');
             setSelectedComparisonPaperIds([]);
+            setSelectedGapPaperIds([]);
             setQuestionText('');
             setComparisonQuestion('');
+            setGapQuestion('');
             setAskError('');
             setCompareError('');
+            setGapError('');
             setChatMode('ask');
         } catch (err) {
             setActionError(err.response?.data?.error || 'Failed to create research session.');
@@ -445,9 +619,20 @@ function ResearchWorkspace() {
                 return validIds.slice(0, 4);
             });
 
+            // Keep gap selection in sync with updated papers
+            setSelectedGapPaperIds((prev) => {
+                const validIds = prev.filter((id) => selectedModalPaperIds.includes(id));
+                if (validIds.length < 2 && selectedModalPaperIds.length >= 2) {
+                    return selectedModalPaperIds.slice(0, 4);
+                }
+                return validIds.slice(0, 4);
+            });
+
             // If papers fall below 2, revert chatMode to 'ask'
             if ((updated.papers?.length || 0) < 2) {
-                setChatMode('ask');
+                if (chatMode === 'compare' || chatMode === 'gap') {
+                    setChatMode('ask');
+                }
             }
 
             setSessions((prev) =>
@@ -486,9 +671,12 @@ function ResearchWorkspace() {
             }
 
             setSelectedComparisonPaperIds((prev) => prev.filter((id) => id !== paperIdToRemove));
+            setSelectedGapPaperIds((prev) => prev.filter((id) => id !== paperIdToRemove));
 
             if ((updated.papers?.length || 0) < 2) {
-                setChatMode('ask');
+                if (chatMode === 'compare' || chatMode === 'gap') {
+                    setChatMode('ask');
+                }
             }
 
             setSessions((prev) =>
@@ -504,6 +692,19 @@ function ResearchWorkspace() {
     // Toggle Paper Selection for Multi-Paper Comparison (enforce min 2, max 4)
     const handleToggleComparisonPaper = (paperId) => {
         setSelectedComparisonPaperIds((prev) => {
+            if (prev.includes(paperId)) {
+                return prev.filter((id) => id !== paperId);
+            }
+            if (prev.length >= 4) {
+                return prev; // Maximum 4 papers strictly enforced
+            }
+            return [...prev, paperId];
+        });
+    };
+
+    // Toggle Paper Selection for Research Gap Analysis (enforce min 2, max 4)
+    const handleToggleGapPaper = (paperId) => {
+        setSelectedGapPaperIds((prev) => {
             if (prev.includes(paperId)) {
                 return prev.filter((id) => id !== paperId);
             }
@@ -701,6 +902,140 @@ function ResearchWorkspace() {
         }
     };
 
+    // Send Multi-Paper Research Gap Analysis via POST /api/ai/gap-analysis/
+    const handleGenerateGapAnalysis = async () => {
+        if (loadingGap || loadingCompare || loadingAsk) return;
+
+        if (selectedGapPaperIds.length < 2 || selectedGapPaperIds.length > 4) {
+            setGapError('Please select between 2 and 4 papers for research gap analysis.');
+            return;
+        }
+
+        if (!activeSessionId) return;
+
+        const trimmed = gapQuestion.trim();
+        const effectiveQuestion = trimmed || DEFAULT_GAP_QUESTION;
+
+        try {
+            setLoadingGap(true);
+            setGapError('');
+
+            const res = await api.post('/ai/gap-analysis/', {
+                paper_ids: selectedGapPaperIds,
+                question: effectiveQuestion,
+                session_id: activeSessionId
+            });
+
+            // Clear input
+            setGapQuestion('');
+
+            const gapData = res.data.gap_analysis || {};
+
+            // Collect all unique sources from response across all categories
+            const paperMap = {};
+            (activeSession?.papers || []).forEach((p) => {
+                paperMap[p.id] = p.title;
+            });
+
+            const allSources = [];
+            const seenKeys = new Set();
+            const sections = [
+                gapData.common_limitations,
+                gapData.methodological_gaps,
+                gapData.dataset_population_gaps,
+                gapData.understudied_areas,
+                gapData.contradictions_inconsistencies,
+                gapData.unanswered_research_questions,
+                gapData.future_research_directions,
+            ];
+
+            sections.forEach((sec) => {
+                if (Array.isArray(sec)) {
+                    sec.forEach((item) => {
+                        if (item && Array.isArray(item.sources)) {
+                            item.sources.forEach((src) => {
+                                if (src) {
+                                    const key = src.chunk_id ? `${src.paper_id}-${src.chunk_id}` : `${src.paper_id}-${src.page_number}-${src.text}`;
+                                    if (!seenKeys.has(key)) {
+                                        seenKeys.add(key);
+                                        allSources.push({
+                                            id: src.chunk_id || `ev-gap-${Date.now()}-${allSources.length}`,
+                                            paper_id: src.paper_id,
+                                            paper_title: paperMap[src.paper_id] || src.paper_title || 'Paper',
+                                            chunk_id: src.chunk_id,
+                                            page_number: src.page_number,
+                                            text: src.text || ''
+                                        });
+                                    }
+                                }
+                            });
+                        }
+                    });
+                }
+            });
+
+            const userMsg = {
+                id: `user-${Date.now()}`,
+                role: 'USER',
+                content: effectiveQuestion,
+                created_at: new Date().toISOString()
+            };
+
+            const assistantMsg = {
+                id: `assistant-${Date.now()}`,
+                role: 'ASSISTANT',
+                content: gapData,
+                created_at: new Date().toISOString(),
+                evidence: allSources
+            };
+
+            // Auto-title session if default title
+            const isDefaultTitle = activeSession?.title === 'Research Session' || activeSession?.title === 'New Research Session';
+            const isFirstMessage = (!activeSession?.messages || activeSession.messages.length === 0);
+            let nextGapTitle = activeSession?.title || 'Research Session';
+            if (isDefaultTitle && isFirstMessage) {
+                const autoTitle = generateAutoTitle(effectiveQuestion);
+                if (autoTitle && autoTitle !== nextGapTitle) {
+                    nextGapTitle = autoTitle;
+                    api.patch(`/ai/sessions/${activeSessionId}/`, { title: autoTitle }).catch((err) => {
+                        console.warn('Failed to auto-update session title:', err);
+                    });
+                }
+            }
+
+            setActiveSession((prev) => ({
+                ...prev,
+                title: nextGapTitle,
+                messages: [...(prev?.messages || []), userMsg, assistantMsg],
+                updated_at: new Date().toISOString()
+            }));
+
+            setSessions((prev) =>
+                prev.map((s) => (s.id === activeSessionId ? { ...s, title: nextGapTitle, updated_at: new Date().toISOString() } : s))
+            );
+
+            scrollToBottom();
+        } catch (err) {
+            if (err.response?.status === 400) {
+                setGapError(err.response.data?.error || 'Please select between 2 and 4 papers.');
+            } else if (err.response?.status === 401) {
+                setGapError('Authentication required.');
+            } else if (err.response?.status === 403) {
+                setGapError('You do not have access to one or more selected papers or this session.');
+            } else if (err.response?.status === 404) {
+                setGapError('Research session or papers not found.');
+            } else if (err.response?.status === 429) {
+                setGapError('Gemini API rate limit exceeded. Please try again later.');
+            } else if (err.response?.status === 503) {
+                setGapError('Gemini is temporarily unavailable. Please try again shortly.');
+            } else {
+                setGapError(err.response?.data?.error || 'Network or server error. Please try again.');
+            }
+        } finally {
+            setLoadingGap(false);
+        }
+    };
+
     // Keyboard shortcut for Single-Paper Ask
     const handleKeyDown = (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -724,8 +1059,9 @@ function ResearchWorkspace() {
             );
         }
 
-        // Assistant Message: Check for structured comparison JSON
+        // Assistant Message: Check for structured comparison or research gap analysis JSON
         const parsedComp = parseStructuredComparison(msg.content, activeSession?.papers || []);
+        const parsedGap = !parsedComp ? parseStructuredGapAnalysis(msg.content, activeSession?.papers || []) : null;
 
         return (
             <div key={msg.id} className="message-row assistant">
@@ -888,12 +1224,196 @@ function ResearchWorkspace() {
                                 </div>
                             )}
                         </div>
+                    ) : parsedGap ? (
+                        <div className="structured-gap-view">
+                            <span className="gap-badge-tag">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                                </svg>
+                                Multi-Paper Research Gap Analysis
+                            </span>
+
+                            {/* Overall Assessment */}
+                            {parsedGap.overall_assessment && (
+                                <div className="comparison-box gap-assessment-box">
+                                    <h4 className="comparison-box-title" style={{ color: 'var(--accent-primary)' }}>
+                                        Overall Assessment
+                                    </h4>
+                                    <p style={{ margin: 0, lineHeight: 1.6, color: 'var(--text-primary)' }}>
+                                        {parsedGap.overall_assessment}
+                                    </p>
+                                </div>
+                            )}
+
+                            {/* Common Limitations */}
+                            {Array.isArray(parsedGap.common_limitations) && parsedGap.common_limitations.length > 0 && (
+                                <div>
+                                    <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
+                                        Common Limitations
+                                    </h4>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                        {parsedGap.common_limitations.map((item, idx) => (
+                                            <div key={idx} className="comparison-box">
+                                                <p style={{ margin: 0, fontWeight: 500 }}>{item.statement || item.summary}</p>
+                                                {Array.isArray(item.sources) && item.sources.length > 0 && (
+                                                    <div style={{ marginTop: '0.5rem' }}>
+                                                        {item.sources.map((src, sIdx) => (
+                                                            <EvidenceSource key={sIdx} source={src} projectId={projectId} />
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Methodological Gaps */}
+                            {Array.isArray(parsedGap.methodological_gaps) && parsedGap.methodological_gaps.length > 0 && (
+                                <div>
+                                    <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
+                                        Methodological Gaps
+                                    </h4>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                        {parsedGap.methodological_gaps.map((item, idx) => (
+                                            <div key={idx} className="comparison-box">
+                                                <p style={{ margin: 0, fontWeight: 500 }}>{item.statement || item.summary}</p>
+                                                {Array.isArray(item.sources) && item.sources.length > 0 && (
+                                                    <div style={{ marginTop: '0.5rem' }}>
+                                                        {item.sources.map((src, sIdx) => (
+                                                            <EvidenceSource key={sIdx} source={src} projectId={projectId} />
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Dataset / Population Gaps */}
+                            {Array.isArray(parsedGap.dataset_population_gaps) && parsedGap.dataset_population_gaps.length > 0 && (
+                                <div>
+                                    <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
+                                        Dataset & Population Gaps
+                                    </h4>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                        {parsedGap.dataset_population_gaps.map((item, idx) => (
+                                            <div key={idx} className="comparison-box">
+                                                <p style={{ margin: 0, fontWeight: 500 }}>{item.statement || item.summary}</p>
+                                                {Array.isArray(item.sources) && item.sources.length > 0 && (
+                                                    <div style={{ marginTop: '0.5rem' }}>
+                                                        {item.sources.map((src, sIdx) => (
+                                                            <EvidenceSource key={sIdx} source={src} projectId={projectId} />
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Understudied Areas */}
+                            {Array.isArray(parsedGap.understudied_areas) && parsedGap.understudied_areas.length > 0 && (
+                                <div>
+                                    <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
+                                        Understudied Areas
+                                    </h4>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                        {parsedGap.understudied_areas.map((item, idx) => (
+                                            <div key={idx} className="comparison-box">
+                                                <p style={{ margin: 0, fontWeight: 500 }}>{item.statement || item.summary}</p>
+                                                {Array.isArray(item.sources) && item.sources.length > 0 && (
+                                                    <div style={{ marginTop: '0.5rem' }}>
+                                                        {item.sources.map((src, sIdx) => (
+                                                            <EvidenceSource key={sIdx} source={src} projectId={projectId} />
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Contradictions & Inconsistencies */}
+                            {Array.isArray(parsedGap.contradictions_inconsistencies) && parsedGap.contradictions_inconsistencies.length > 0 && (
+                                <div>
+                                    <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
+                                        Contradictions & Inconsistencies
+                                    </h4>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                        {parsedGap.contradictions_inconsistencies.map((item, idx) => (
+                                            <div key={idx} className="comparison-box">
+                                                <p style={{ margin: 0, fontWeight: 500 }}>{item.statement || item.summary}</p>
+                                                {Array.isArray(item.sources) && item.sources.length > 0 && (
+                                                    <div style={{ marginTop: '0.5rem' }}>
+                                                        {item.sources.map((src, sIdx) => (
+                                                            <EvidenceSource key={sIdx} source={src} projectId={projectId} />
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Unanswered Research Questions */}
+                            {Array.isArray(parsedGap.unanswered_research_questions) && parsedGap.unanswered_research_questions.length > 0 && (
+                                <div>
+                                    <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
+                                        Unanswered Research Questions
+                                    </h4>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                        {parsedGap.unanswered_research_questions.map((item, idx) => (
+                                            <div key={idx} className="comparison-box">
+                                                <p style={{ margin: 0, fontWeight: 500 }}>{item.question || item.statement || item.summary}</p>
+                                                {Array.isArray(item.sources) && item.sources.length > 0 && (
+                                                    <div style={{ marginTop: '0.5rem' }}>
+                                                        {item.sources.map((src, sIdx) => (
+                                                            <EvidenceSource key={sIdx} source={src} projectId={projectId} />
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Future Research Directions */}
+                            {Array.isArray(parsedGap.future_research_directions) && parsedGap.future_research_directions.length > 0 && (
+                                <div>
+                                    <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
+                                        Future Research Directions
+                                    </h4>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                        {parsedGap.future_research_directions.map((item, idx) => (
+                                            <div key={idx} className="comparison-box">
+                                                <p style={{ margin: 0, fontWeight: 500 }}>{item.direction || item.statement || item.summary}</p>
+                                                {Array.isArray(item.sources) && item.sources.length > 0 && (
+                                                    <div style={{ marginTop: '0.5rem' }}>
+                                                        {item.sources.map((src, sIdx) => (
+                                                            <EvidenceSource key={sIdx} source={src} projectId={projectId} />
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     ) : (
                         <p className="message-text">{msg.content}</p>
                     )}
 
                     {/* Saved Grounded Evidence Sources (Single-Paper Ask) */}
-                    {Array.isArray(msg.evidence) && msg.evidence.length > 0 && !parsedComp && (
+                    {Array.isArray(msg.evidence) && msg.evidence.length > 0 && !parsedComp && !parsedGap && (
                         <div className="message-evidence-container">
                             <div className="evidence-header-label">
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -1330,6 +1850,13 @@ function ResearchWorkspace() {
                                     </div>
                                 )}
 
+                                {loadingGap && (
+                                    <div className="ai-analyzing-banner">
+                                        <span className="spinner-icon-sm"></span>
+                                        <span>NForge AI is analyzing research gaps across papers...</span>
+                                    </div>
+                                )}
+
                                 <div ref={messagesEndRef} />
                             </div>
 
@@ -1343,7 +1870,7 @@ function ResearchWorkspace() {
                                                 type="button"
                                                 className={`chat-mode-tab ${chatMode === 'ask' ? 'active' : ''}`}
                                                 onClick={() => setChatMode('ask')}
-                                                disabled={loadingAsk || loadingCompare}
+                                                disabled={loadingAsk || loadingCompare || loadingGap}
                                             >
                                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                                     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
@@ -1354,7 +1881,7 @@ function ResearchWorkspace() {
                                                 type="button"
                                                 className={`chat-mode-tab ${chatMode === 'compare' ? 'active' : ''}`}
                                                 onClick={() => setChatMode('compare')}
-                                                disabled={loadingAsk || loadingCompare || !hasAtLeastTwoPapers}
+                                                disabled={loadingAsk || loadingCompare || loadingGap || !hasAtLeastTwoPapers}
                                                 title={!hasAtLeastTwoPapers ? 'Add at least 2 papers to compare' : 'Compare 2 to 4 papers'}
                                             >
                                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1365,6 +1892,25 @@ function ResearchWorkspace() {
                                                     <line x1="4" y1="4" x2="9" y2="9"></line>
                                                 </svg>
                                                 Compare Papers
+                                                {!hasAtLeastTwoPapers ? (
+                                                    <span className="mode-tab-badge disabled">Requires 2+ papers</span>
+                                                ) : (
+                                                    <span className="mode-tab-badge">2–4</span>
+                                                )}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                className={`chat-mode-tab ${chatMode === 'gap' ? 'active' : ''}`}
+                                                onClick={() => setChatMode('gap')}
+                                                disabled={loadingAsk || loadingCompare || loadingGap || !hasAtLeastTwoPapers}
+                                                title={!hasAtLeastTwoPapers ? 'Add at least 2 papers to analyze gaps' : 'Identify research gaps across 2 to 4 papers'}
+                                            >
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                    <circle cx="12" cy="12" r="10"></circle>
+                                                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                                                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                                                </svg>
+                                                Research Gaps
                                                 {!hasAtLeastTwoPapers ? (
                                                     <span className="mode-tab-badge disabled">Requires 2+ papers</span>
                                                 ) : (
@@ -1385,7 +1931,7 @@ function ResearchWorkspace() {
                                                         className="chat-paper-select"
                                                         value={selectedPaperId}
                                                         onChange={(e) => setSelectedPaperId(e.target.value)}
-                                                        disabled={loadingAsk || loadingCompare}
+                                                        disabled={loadingAsk || loadingCompare || loadingGap}
                                                     >
                                                         {activeSession.papers.map((p) => (
                                                             <option key={p.id} value={p.id}>
@@ -1393,6 +1939,29 @@ function ResearchWorkspace() {
                                                             </option>
                                                         ))}
                                                     </select>
+                                                </div>
+
+                                                {/* Research Prompt Shortcuts for Single Paper */}
+                                                <div className="prompt-shortcuts-row">
+                                                    <span className="prompt-shortcuts-label">
+                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ opacity: 0.75 }}>
+                                                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                                                        </svg>
+                                                        Research prompts:
+                                                    </span>
+                                                    {SINGLE_PAPER_SHORTCUTS.map((item, idx) => (
+                                                        <button
+                                                            key={idx}
+                                                            type="button"
+                                                            className="prompt-shortcut-btn"
+                                                            disabled={loadingAsk || loadingCompare || loadingGap}
+                                                            onClick={() => setQuestionText(item.prompt)}
+                                                            title={item.prompt}
+                                                            aria-label={`Fill prompt: ${item.label}`}
+                                                        >
+                                                            {item.label}
+                                                        </button>
+                                                    ))}
                                                 </div>
 
                                                 {askError && (
@@ -1408,13 +1977,13 @@ function ResearchWorkspace() {
                                                         value={questionText}
                                                         onChange={(e) => setQuestionText(e.target.value)}
                                                         onKeyDown={handleKeyDown}
-                                                        disabled={loadingAsk || loadingCompare}
+                                                        disabled={loadingAsk || loadingCompare || loadingGap}
                                                         rows={2}
                                                     />
                                                     <button
                                                         className="chat-send-btn"
                                                         onClick={handleSendQuestion}
-                                                        disabled={loadingAsk || loadingCompare || !questionText.trim() || !selectedPaperId}
+                                                        disabled={loadingAsk || loadingCompare || loadingGap || !questionText.trim() || !selectedPaperId}
                                                         title="Send question (Enter)"
                                                         type="button"
                                                     >
@@ -1461,7 +2030,7 @@ function ResearchWorkspace() {
                                                                     <input
                                                                         type="checkbox"
                                                                         checked={isSelected}
-                                                                        disabled={loadingCompare || isMaxReached}
+                                                                        disabled={loadingCompare || loadingGap || isMaxReached}
                                                                         onChange={() => handleToggleComparisonPaper(p.id)}
                                                                     />
                                                                     <span className="compare-paper-pill-title">{p.title}</span>
@@ -1471,22 +2040,29 @@ function ResearchWorkspace() {
                                                     </div>
                                                 </div>
 
-                                                {/* Example Comparison Prompts */}
-                                                <div className="compare-examples-row">
-                                                    <span className="compare-examples-label">Try focus:</span>
-                                                    {[
-                                                        'Compare methodology and study design',
-                                                        'Compare key findings and results',
-                                                        'Compare limitations and research gaps'
-                                                    ].map((example, idx) => (
+                                                {/* Research Prompt Shortcuts for Multi-Paper Comparison */}
+                                                <div className="prompt-shortcuts-row">
+                                                    <span className="prompt-shortcuts-label">
+                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ opacity: 0.75 }}>
+                                                            <polyline points="16 3 21 3 21 8"></polyline>
+                                                            <line x1="4" y1="20" x2="21" y2="3"></line>
+                                                            <polyline points="21 16 21 21 16 21"></polyline>
+                                                            <line x1="15" y1="15" x2="21" y2="21"></line>
+                                                            <line x1="4" y1="4" x2="9" y2="9"></line>
+                                                        </svg>
+                                                        Comparison prompts:
+                                                    </span>
+                                                    {COMPARISON_SHORTCUTS.map((item, idx) => (
                                                         <button
                                                             key={idx}
                                                             type="button"
-                                                            className="compare-example-btn"
-                                                            disabled={loadingCompare}
-                                                            onClick={() => setComparisonQuestion(example)}
+                                                            className="prompt-shortcut-btn"
+                                                            disabled={loadingCompare || loadingAsk || loadingGap}
+                                                            onClick={() => setComparisonQuestion(item.prompt)}
+                                                            title={item.prompt}
+                                                            aria-label={`Fill prompt: ${item.label}`}
                                                         >
-                                                            {example}
+                                                            {item.label}
                                                         </button>
                                                     ))}
                                                 </div>
@@ -1503,13 +2079,13 @@ function ResearchWorkspace() {
                                                         placeholder="What would you like to compare? e.g. methodology, findings, limitations, and research gaps"
                                                         value={comparisonQuestion}
                                                         onChange={(e) => setComparisonQuestion(e.target.value)}
-                                                        disabled={loadingCompare}
+                                                        disabled={loadingCompare || loadingGap}
                                                         rows={2}
                                                     />
                                                     <button
                                                         className="chat-send-btn compare-btn"
                                                         onClick={handleGenerateComparison}
-                                                        disabled={loadingCompare || selectedComparisonPaperIds.length < 2 || selectedComparisonPaperIds.length > 4}
+                                                        disabled={loadingCompare || loadingGap || loadingAsk || selectedComparisonPaperIds.length < 2 || selectedComparisonPaperIds.length > 4}
                                                         title="Generate cross-paper comparison"
                                                         type="button"
                                                     >
@@ -1525,6 +2101,107 @@ function ResearchWorkspace() {
                                                             </svg>
                                                         )}
                                                         <span>Generate Comparison</span>
+                                                    </button>
+                                                </div>
+                                            </>
+                                        )}
+
+                                        {/* MODE 3: Multi-Paper Research Gap Analysis */}
+                                        {chatMode === 'gap' && (
+                                            <>
+                                                {/* Select 2-4 Papers for Research Gap Analysis */}
+                                                <div className="compare-selection-bar">
+                                                    <div className="compare-selection-header">
+                                                        <span className="compare-selection-title">
+                                                            Select 2 to 4 papers to analyze gaps:
+                                                        </span>
+                                                        <span className={`compare-selection-count ${selectedGapPaperIds.length < 2 ? 'warn' : 'valid'}`}>
+                                                            {selectedGapPaperIds.length}/4 selected
+                                                            {selectedGapPaperIds.length < 2 && ' (minimum 2)'}
+                                                        </span>
+                                                    </div>
+
+                                                    <div className="compare-papers-grid">
+                                                        {activeSession.papers.map((p) => {
+                                                            const isSelected = selectedGapPaperIds.includes(p.id);
+                                                            const isMaxReached = selectedGapPaperIds.length >= 4 && !isSelected;
+
+                                                            return (
+                                                                <label
+                                                                    key={p.id}
+                                                                    className={`compare-paper-pill ${isSelected ? 'selected' : ''} ${isMaxReached ? 'disabled' : ''}`}
+                                                                    title={isMaxReached ? 'Maximum 4 papers reached (deselect one first)' : p.title}
+                                                                >
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={isSelected}
+                                                                        disabled={loadingGap || loadingCompare || isMaxReached}
+                                                                        onChange={() => handleToggleGapPaper(p.id)}
+                                                                    />
+                                                                    <span className="compare-paper-pill-title">{p.title}</span>
+                                                                </label>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+
+                                                {/* Research Prompt Shortcuts for Research Gap Analysis */}
+                                                <div className="prompt-shortcuts-row">
+                                                    <span className="prompt-shortcuts-label">
+                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ opacity: 0.75 }}>
+                                                            <circle cx="12" cy="12" r="10"></circle>
+                                                            <line x1="12" y1="8" x2="12" y2="12"></line>
+                                                            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                                                        </svg>
+                                                        Gap prompts:
+                                                    </span>
+                                                    {RESEARCH_GAP_SHORTCUTS.map((item, idx) => (
+                                                        <button
+                                                            key={idx}
+                                                            type="button"
+                                                            className="prompt-shortcut-btn"
+                                                            disabled={loadingGap || loadingCompare || loadingAsk}
+                                                            onClick={() => setGapQuestion(item.prompt)}
+                                                            title={item.prompt}
+                                                            aria-label={`Fill prompt: ${item.label}`}
+                                                        >
+                                                            {item.label}
+                                                        </button>
+                                                    ))}
+                                                </div>
+
+                                                {gapError && (
+                                                    <div className="alert-box error" style={{ marginBottom: '0.75rem' }}>
+                                                        {gapError}
+                                                    </div>
+                                                )}
+
+                                                <div className="chat-input-row">
+                                                    <textarea
+                                                        className="chat-textarea"
+                                                        placeholder="Identify the major research gaps, limitations, unanswered questions, and future research directions across these papers..."
+                                                        value={gapQuestion}
+                                                        onChange={(e) => setGapQuestion(e.target.value)}
+                                                        disabled={loadingGap || loadingCompare}
+                                                        rows={2}
+                                                    />
+                                                    <button
+                                                        className="chat-send-btn gap-btn"
+                                                        onClick={handleGenerateGapAnalysis}
+                                                        disabled={loadingGap || loadingCompare || loadingAsk || selectedGapPaperIds.length < 2 || selectedGapPaperIds.length > 4}
+                                                        title="Generate research gap analysis"
+                                                        type="button"
+                                                    >
+                                                        {loadingGap ? (
+                                                            <span className="spinner-icon-sm"></span>
+                                                        ) : (
+                                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                                <circle cx="12" cy="12" r="10"></circle>
+                                                                <line x1="12" y1="8" x2="12" y2="12"></line>
+                                                                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                                                            </svg>
+                                                        )}
+                                                        <span>Generate Research Gap Analysis</span>
                                                     </button>
                                                 </div>
                                             </>
