@@ -22,6 +22,7 @@ from .services import (
     retrieve_multi_paper_evidence,
     generate_multi_paper_synthesis,
     generate_research_gap_analysis,
+    generate_thematic_analysis,
     RateLimitError,
 )
 
@@ -549,6 +550,181 @@ def research_gap_analysis_view(request):
                 papers=ordered_papers,
             )
             return Response(gap_response, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return handle_ai_exception(e)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def thematic_analysis_view(request):
+    """
+    POST /api/ai/thematic-analysis/
+    Performs cross-paper thematic analysis over 2-4 selected papers.
+    Validates paper existence, project ownership, optional session project alignment,
+    and invokes generate_thematic_analysis().
+    If session_id is provided, persists USER and ASSISTANT messages and deduplicated
+    evidence inside an atomic transaction.
+    """
+    try:
+        paper_ids = request.data.get("paper_ids")
+        question = request.data.get("question")
+        session_id = request.data.get("session_id")
+
+        # 1. Validate paper_ids existence & type
+        if paper_ids is None or not isinstance(paper_ids, list):
+            return Response({
+                "error": "paper_ids must be a list.",
+                "code": "BAD_REQUEST"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # 2. Validate paper count (min 2, max 4)
+        if len(paper_ids) < 2 or len(paper_ids) > 4:
+            return Response({
+                "error": "Thematic analysis requires between 2 and 4 papers.",
+                "code": "BAD_REQUEST"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # 3. Validate paper_ids integers & duplicates
+        for pid in paper_ids:
+            if not isinstance(pid, int) or isinstance(pid, bool):
+                return Response({
+                    "error": "All paper_ids must be integers.",
+                    "code": "BAD_REQUEST"
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        if len(paper_ids) != len(set(paper_ids)):
+            return Response({
+                "error": "Duplicate paper IDs are not allowed.",
+                "code": "BAD_REQUEST"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # 4. Verify paper existence & user access while preserving requested order
+        ordered_papers = []
+        for pid in paper_ids:
+            try:
+                paper = Paper.objects.get(id=pid)
+            except Paper.DoesNotExist:
+                return Response({
+                    "error": "One or more requested papers were not found.",
+                    "code": "NOT_FOUND"
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            if paper.project.owner != request.user:
+                return Response({
+                    "error": "Access denied for one or more requested papers.",
+                    "code": "FORBIDDEN"
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            ordered_papers.append(paper)
+
+        # 5. Session validation (optional session_id)
+        session = None
+        if session_id is not None:
+            try:
+                session = ResearchSession.objects.get(id=session_id)
+            except (ResearchSession.DoesNotExist, ValueError, TypeError):
+                return Response({
+                    "error": "Research session not found.",
+                    "code": "NOT_FOUND"
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            if session.project.owner != request.user:
+                return Response({
+                    "error": "Access denied.",
+                    "code": "FORBIDDEN"
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            for paper in ordered_papers:
+                if paper.project != session.project:
+                    return Response({
+                        "error": "One or more papers do not belong to this research session.",
+                        "code": "BAD_REQUEST"
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+        # 6. Default question fallback if question is empty/missing
+        DEFAULT_THEMATIC_QUESTION = (
+            "Identify the major themes, recurring concepts, and important cross-paper patterns across these papers."
+        )
+        effective_question = (
+            question.strip()
+            if (question and isinstance(question, str) and question.strip())
+            else DEFAULT_THEMATIC_QUESTION
+        )
+
+        # 7. Execute single-call Thematic Analysis service and persist if session provided
+        if session:
+            with transaction.atomic():
+                user_msg = ResearchMessage.objects.create(
+                    session=session,
+                    role=ResearchMessage.ROLE_USER,
+                    content=effective_question,
+                )
+
+                thematic_response = generate_thematic_analysis(
+                    question=effective_question,
+                    papers=ordered_papers,
+                )
+
+                thematic_data = thematic_response.get("thematic_analysis", {})
+                assistant_msg = ResearchMessage.objects.create(
+                    session=session,
+                    role=ResearchMessage.ROLE_ASSISTANT,
+                    content=json.dumps(thematic_data),
+                )
+
+                # Collect all validated sources across all themes without duplication
+                unique_sources = []
+                seen_keys = set()
+                themes = thematic_data.get("themes", [])
+
+                if isinstance(themes, list):
+                    for theme in themes:
+                        if isinstance(theme, dict):
+                            papers_in_theme = theme.get("papers", [])
+                            if isinstance(papers_in_theme, list):
+                                for p_entry in papers_in_theme:
+                                    if isinstance(p_entry, dict):
+                                        for src in p_entry.get("sources", []):
+                                            if isinstance(src, dict):
+                                                cid = src.get("chunk_id")
+                                                pid = src.get("paper_id")
+                                                dedup_key = (pid, cid) if cid is not None else (pid, src.get("page_number"), src.get("text"))
+                                                if dedup_key not in seen_keys:
+                                                    seen_keys.add(dedup_key)
+                                                    unique_sources.append(src)
+
+                paper_map = {p.id: p for p in ordered_papers}
+                chunk_ids = [s.get("chunk_id") for s in unique_sources if s.get("chunk_id")]
+                chunks_by_id = {c.id: c for c in PaperChunk.objects.filter(id__in=chunk_ids)} if chunk_ids else {}
+
+                for src in unique_sources:
+                    paper_id = src.get("paper_id")
+                    paper_obj = paper_map.get(paper_id)
+                    if not paper_obj and paper_id:
+                        paper_obj = Paper.objects.filter(id=paper_id).first()
+                    if not paper_obj:
+                        continue
+
+                    chunk_obj = chunks_by_id.get(src.get("chunk_id"))
+
+                    ResearchEvidence.objects.create(
+                        message=assistant_msg,
+                        paper=paper_obj,
+                        chunk=chunk_obj,
+                        page_number=src.get("page_number"),
+                        text=src.get("text") or "",
+                    )
+
+                session.save()
+                thematic_response["session_id"] = session.id
+                return Response(thematic_response, status=status.HTTP_200_OK)
+        else:
+            thematic_response = generate_thematic_analysis(
+                question=effective_question,
+                papers=ordered_papers,
+            )
+            return Response(thematic_response, status=status.HTTP_200_OK)
 
     except Exception as e:
         return handle_ai_exception(e)

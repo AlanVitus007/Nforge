@@ -2355,6 +2355,934 @@ class ResearchGapAnalysisAPITests(TestCase):
         self.assertEqual(resp_invalid_str.status_code, 404)
 
 
+class CrossPaperThematicAnalysisServiceTests(TestCase):
+    """
+    Focused unit tests for Phase 7.2.1: Cross-Paper Thematic Analysis backend service.
+    Verifies structured schema, multi-paper retrieval reuse, single Gemini call,
+    parsing robustness, source reference resolution, page number preservation,
+    and boundary handling.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="thematic_user", password="password")
+        self.project = Project.objects.create(owner=self.user, title="Thematic Analysis Project")
+
+        self.paper1 = Paper.objects.create(project=self.project, title="Paper Alpha")
+        self.paper2 = Paper.objects.create(project=self.project, title="Paper Beta")
+        self.paper3 = Paper.objects.create(project=self.project, title="Paper Gamma")
+        self.paper4 = Paper.objects.create(project=self.project, title="Paper Delta")
+
+        self.chunk1 = PaperChunk.objects.create(
+            paper=self.paper1,
+            chunk_index=0,
+            page_number=5,
+            text="Paper Alpha focuses on transformer-based attention models.",
+            embedding=[0.1] * 384,
+        )
+        self.chunk2 = PaperChunk.objects.create(
+            paper=self.paper2,
+            chunk_index=0,
+            page_number=12,
+            text="Paper Beta implements sparse attention mechanisms for efficiency.",
+            embedding=[0.1] * 384,
+        )
+        self.chunk3 = PaperChunk.objects.create(
+            paper=self.paper3,
+            chunk_index=0,
+            page_number=20,
+            text="Paper Gamma investigates recurrent attention networks.",
+            embedding=[0.1] * 384,
+        )
+        self.chunk4 = PaperChunk.objects.create(
+            paper=self.paper4,
+            chunk_index=0,
+            page_number=8,
+            text="Paper Delta examines linear self-attention complexity.",
+            embedding=[0.1] * 384,
+        )
+
+    def test_valid_thematic_analysis_json(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_thematic_analysis
+
+        mock_gemini_response = MagicMock()
+        mock_gemini_response.text = f"""{{
+            "overall_synthesis": "Both papers examine attention mechanisms and computational scaling.",
+            "themes": [
+                {{
+                    "theme": "Attention Optimization",
+                    "description": "Exploration of methods to reduce quadratic attention complexity.",
+                    "papers": [
+                        {{
+                            "paper_id": {self.paper1.id},
+                            "paper_title": "Paper Alpha",
+                            "discussion": "Paper Alpha addresses transformer attention scaling.",
+                            "sources": [
+                                {{"paper_id": {self.paper1.id}, "chunk_id": {self.chunk1.id}}}
+                            ]
+                        }},
+                        {{
+                            "paper_id": {self.paper2.id},
+                            "paper_title": "Paper Beta",
+                            "discussion": "Paper Beta demonstrates sparse attention patterns.",
+                            "sources": [
+                                {{"paper_id": {self.paper2.id}, "chunk_id": {self.chunk2.id}}}
+                            ]
+                        }}
+                    ],
+                    "cross_paper_observation": "Alpha adopts general attention while Beta specializes in sparsity."
+                }}
+            ]
+        }}"""
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_gemini_response) as mock_gemini:
+
+            result = generate_thematic_analysis(
+                question="What cross-paper themes emerge?",
+                papers=[self.paper1, self.paper2],
+            )
+
+            self.assertEqual(mock_gemini.call_count, 1)
+            self.assertIn("thematic_analysis", result)
+            thematic = result["thematic_analysis"]
+
+            self.assertEqual(thematic["overall_synthesis"], "Both papers examine attention mechanisms and computational scaling.")
+            self.assertEqual(len(thematic["themes"]), 1)
+
+            t1 = thematic["themes"][0]
+            self.assertEqual(t1["theme"], "Attention Optimization")
+            self.assertEqual(t1["description"], "Exploration of methods to reduce quadratic attention complexity.")
+            self.assertEqual(t1["cross_paper_observation"], "Alpha adopts general attention while Beta specializes in sparsity.")
+            self.assertEqual(len(t1["papers"]), 2)
+
+            p1 = t1["papers"][0]
+            self.assertEqual(p1["paper_id"], self.paper1.id)
+            self.assertEqual(p1["paper_title"], "Paper Alpha")
+            self.assertEqual(p1["discussion"], "Paper Alpha addresses transformer attention scaling.")
+            self.assertEqual(len(p1["sources"]), 1)
+            self.assertEqual(p1["sources"][0]["chunk_id"], self.chunk1.id)
+            self.assertEqual(p1["sources"][0]["page_number"], 5)
+            self.assertEqual(p1["sources"][0]["paper_id"], self.paper1.id)
+
+            p2 = t1["papers"][1]
+            self.assertEqual(p2["paper_id"], self.paper2.id)
+            self.assertEqual(p2["sources"][0]["chunk_id"], self.chunk2.id)
+            self.assertEqual(p2["sources"][0]["page_number"], 12)
+
+    def test_code_fenced_json(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_thematic_analysis, parse_thematic_analysis_json
+
+        fenced_input = f"""```json
+        {{
+            "overall_synthesis": "Fenced thematic synthesis.",
+            "themes": [
+                {{
+                    "theme": "Fenced Theme",
+                    "description": "Fenced Description",
+                    "papers": [
+                        {{
+                            "paper_id": {self.paper1.id},
+                            "paper_title": "Paper Alpha",
+                            "discussion": "Discussion Alpha",
+                            "sources": [{{"paper_id": {self.paper1.id}, "chunk_id": {self.chunk1.id}}}]
+                        }}
+                    ],
+                    "cross_paper_observation": "Observation"
+                }}
+            ]
+        }}
+        ```"""
+
+        # Direct parser check
+        direct_parsed = parse_thematic_analysis_json(fenced_input)
+        self.assertEqual(direct_parsed["overall_synthesis"], "Fenced thematic synthesis.")
+        self.assertEqual(len(direct_parsed["themes"]), 1)
+
+        # Service execution check
+        mock_resp = MagicMock()
+        mock_resp.text = fenced_input
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_resp):
+
+            result = generate_thematic_analysis(
+                question="Thematic inquiry",
+                papers=[self.paper1, self.paper2],
+            )
+            self.assertEqual(result["overall_synthesis"], "Fenced thematic synthesis.")
+            self.assertEqual(len(result["themes"]), 1)
+            self.assertEqual(result["themes"][0]["theme"], "Fenced Theme")
+
+    def test_malformed_json_fallback(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_thematic_analysis, parse_thematic_analysis_json
+
+        # Direct parser test
+        direct_parsed = parse_thematic_analysis_json("Not a json string { broken")
+        self.assertEqual(direct_parsed["overall_synthesis"], "Thematic synthesis unavailable based on the provided evidence.")
+        self.assertEqual(direct_parsed["themes"], [])
+
+        # Service test
+        mock_resp = MagicMock()
+        mock_resp.text = "Completely broken response from LLM"
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_resp):
+
+            result = generate_thematic_analysis(
+                question="Themes",
+                papers=[self.paper1, self.paper2],
+            )
+            self.assertEqual(result["overall_synthesis"], "Thematic synthesis unavailable based on the provided evidence.")
+            self.assertEqual(result["themes"], [])
+
+    def test_missing_fields_normalization(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_thematic_analysis
+
+        mock_resp = MagicMock()
+        mock_resp.text = """{
+            "overall_synthesis": "Minimal valid structure",
+            "themes": [
+                {
+                    "theme": "Sparse Theme"
+                }
+            ]
+        }"""
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_resp):
+
+            result = generate_thematic_analysis(
+                question="Themes",
+                papers=[self.paper1, self.paper2],
+            )
+            theme = result["themes"][0]
+            self.assertEqual(theme["theme"], "Sparse Theme")
+            self.assertEqual(theme["description"], "No detailed description provided.")
+            self.assertEqual(theme["papers"], [])
+            self.assertEqual(theme["cross_paper_observation"], "")
+
+    def test_invalid_source_references_filtered_out(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_thematic_analysis
+
+        mock_resp = MagicMock()
+        mock_resp.text = f"""{{
+            "overall_synthesis": "Invalid sources test",
+            "themes": [
+                {{
+                    "theme": "Theme with Fabricated Chunk",
+                    "description": "Desc",
+                    "papers": [
+                        {{
+                            "paper_id": {self.paper1.id},
+                            "paper_title": "Paper Alpha",
+                            "discussion": "Disc",
+                            "sources": [
+                                {{"paper_id": {self.paper1.id}, "chunk_id": 999999}},
+                                {{"paper_id": {self.paper2.id}, "chunk_id": {self.chunk1.id}}},
+                                {{"paper_id": {self.paper1.id}, "chunk_id": {self.chunk1.id}}}
+                            ]
+                        }}
+                    ],
+                    "cross_paper_observation": "Obs"
+                }}
+            ]
+        }}"""
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_resp):
+
+            result = generate_thematic_analysis(
+                question="Themes",
+                papers=[self.paper1, self.paper2],
+            )
+            sources = result["themes"][0]["papers"][0]["sources"]
+            # 999999 is fabricated -> filtered out
+            # chunk1 belongs to paper1, but second ref specified paper2 -> filtered out
+            # only the valid chunk1 reference survives
+            self.assertEqual(len(sources), 1)
+            self.assertEqual(sources[0]["chunk_id"], self.chunk1.id)
+            self.assertEqual(sources[0]["paper_id"], self.paper1.id)
+
+    def test_valid_source_references_resolved(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_thematic_analysis
+
+        mock_resp = MagicMock()
+        mock_resp.text = f"""{{
+            "overall_synthesis": "Valid sources test",
+            "themes": [
+                {{
+                    "theme": "Theme A",
+                    "description": "Desc A",
+                    "papers": [
+                        {{
+                            "paper_id": {self.paper1.id},
+                            "paper_title": "Paper Alpha",
+                            "discussion": "Discussion 1",
+                            "sources": [
+                                {{"paper_id": {self.paper1.id}, "chunk_id": {self.chunk1.id}}}
+                            ]
+                        }},
+                        {{
+                            "paper_id": {self.paper2.id},
+                            "paper_title": "Paper Beta",
+                            "discussion": "Discussion 2",
+                            "sources": [
+                                {{"paper_id": {self.paper2.id}, "chunk_id": {self.chunk2.id}}}
+                            ]
+                        }}
+                    ],
+                    "cross_paper_observation": "Obs"
+                }}
+            ]
+        }}"""
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_resp):
+
+            result = generate_thematic_analysis(
+                question="Themes",
+                papers=[self.paper1, self.paper2],
+            )
+            papers = result["themes"][0]["papers"]
+            self.assertEqual(len(papers[0]["sources"]), 1)
+            self.assertEqual(papers[0]["sources"][0]["chunk_id"], self.chunk1.id)
+            self.assertEqual(papers[0]["sources"][0]["page_number"], 5)
+            self.assertEqual(papers[0]["sources"][0]["paper_id"], self.paper1.id)
+            self.assertIn("Paper Alpha focuses on transformer", papers[0]["sources"][0]["text"])
+
+            self.assertEqual(len(papers[1]["sources"]), 1)
+            self.assertEqual(papers[1]["sources"][0]["chunk_id"], self.chunk2.id)
+            self.assertEqual(papers[1]["sources"][0]["page_number"], 12)
+            self.assertEqual(papers[1]["sources"][0]["paper_id"], self.paper2.id)
+
+    def test_two_paper_input_boundary(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_thematic_analysis
+
+        mock_resp = MagicMock()
+        mock_resp.text = '{"overall_synthesis": "2 papers analyzed.", "themes": []}'
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_resp):
+
+            result = generate_thematic_analysis(
+                question="Themes",
+                papers=[self.paper1, self.paper2],
+            )
+            self.assertEqual(len(result["papers"]), 2)
+            self.assertEqual(result["overall_synthesis"], "2 papers analyzed.")
+
+    def test_four_paper_input_boundary(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_thematic_analysis
+
+        mock_resp = MagicMock()
+        mock_resp.text = '{"overall_synthesis": "4 papers analyzed.", "themes": []}'
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_resp):
+
+            result = generate_thematic_analysis(
+                question="Themes",
+                papers=[self.paper1, self.paper2, self.paper3, self.paper4],
+            )
+            self.assertEqual(len(result["papers"]), 4)
+            self.assertEqual(result["overall_synthesis"], "4 papers analyzed.")
+
+    def test_rejection_fewer_than_two_papers(self):
+        from ai.services import generate_thematic_analysis
+
+        # 0 papers
+        with self.assertRaises(ValueError) as ctx:
+            generate_thematic_analysis("Themes", [])
+        self.assertIn("non-empty list", str(ctx.exception))
+
+        # 1 paper
+        with self.assertRaises(ValueError) as ctx:
+            generate_thematic_analysis("Themes", [self.paper1])
+        self.assertIn("requires between 2 and 4 papers", str(ctx.exception))
+
+    def test_rejection_more_than_four_papers(self):
+        from ai.services import generate_thematic_analysis
+
+        paper5 = Paper.objects.create(project=self.project, title="Paper Epsilon")
+        with self.assertRaises(ValueError) as ctx:
+            generate_thematic_analysis("Themes", [self.paper1, self.paper2, self.paper3, self.paper4, paper5])
+        self.assertIn("requires between 2 and 4 papers", str(ctx.exception))
+
+    def test_rejection_duplicate_papers(self):
+        from ai.services import generate_thematic_analysis
+
+        with self.assertRaises(ValueError) as ctx:
+            generate_thematic_analysis("Themes", [self.paper1, self.paper1])
+        self.assertIn("unique Paper instances", str(ctx.exception))
+
+        with self.assertRaises(ValueError) as ctx:
+            generate_thematic_analysis("Themes", [self.paper1, self.paper2, self.paper1])
+        self.assertIn("unique Paper instances", str(ctx.exception))
+
+    def test_rejection_non_paper_instances(self):
+        from ai.services import generate_thematic_analysis
+
+        with self.assertRaises(ValueError) as ctx:
+            generate_thematic_analysis("Themes", [self.paper1, "not-a-paper"])
+        self.assertIn("must be a valid Paper instance", str(ctx.exception))
+
+    def test_exactly_one_gemini_call(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_thematic_analysis
+
+        mock_resp = MagicMock()
+        mock_resp.text = '{"overall_synthesis": "Single call test.", "themes": []}'
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_resp) as mock_gemini:
+
+            generate_thematic_analysis(
+                question="Themes",
+                papers=[self.paper1, self.paper2],
+            )
+            self.assertEqual(mock_gemini.call_count, 1)
+
+    def test_retrieval_is_reused_rather_than_duplicated(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_thematic_analysis
+
+        mock_resp = MagicMock()
+        mock_resp.text = '{"overall_synthesis": "Retrieval reuse test.", "themes": []}'
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.retrieve_multi_paper_evidence", wraps=None) as mock_retrieval, \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_resp):
+
+            mock_retrieval.return_value = [
+                {"paper_id": self.paper1.id, "paper_title": self.paper1.title, "sources": [{"chunk_id": self.chunk1.id, "page_number": 5, "text": "Alpha text"}]},
+                {"paper_id": self.paper2.id, "paper_title": self.paper2.title, "sources": [{"chunk_id": self.chunk2.id, "page_number": 12, "text": "Beta text"}]},
+            ]
+
+            generate_thematic_analysis(
+                question="Themes",
+                papers=[self.paper1, self.paper2],
+            )
+            self.assertEqual(mock_retrieval.call_count, 1)
+            args, kwargs = mock_retrieval.call_args
+            self.assertEqual(kwargs.get("top_k_per_paper"), 5)
+            self.assertEqual(kwargs.get("papers"), [self.paper1, self.paper2])
+
+    def test_empty_retrieval_chunks_skips_gemini(self):
+        from unittest.mock import patch
+        from ai.services import generate_thematic_analysis
+
+        empty_paper_a = Paper.objects.create(project=self.project, title="Empty Paper A")
+        empty_paper_b = Paper.objects.create(project=self.project, title="Empty Paper B")
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini") as mock_gemini:
+
+            result = generate_thematic_analysis(
+                question="Themes",
+                papers=[empty_paper_a, empty_paper_b],
+            )
+            self.assertEqual(mock_gemini.call_count, 0)
+            self.assertIn("Insufficient text content", result["overall_synthesis"])
+            self.assertEqual(result["themes"], [])
+
+    def test_no_database_writes_performed(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_thematic_analysis
+        from ai.models import ResearchMessage, ResearchEvidence
+
+        initial_messages = ResearchMessage.objects.count()
+        initial_evidence = ResearchEvidence.objects.count()
+
+        mock_resp = MagicMock()
+        mock_resp.text = f"""{{
+            "overall_synthesis": "Synthesis",
+            "themes": [
+                {{
+                    "theme": "Theme",
+                    "description": "Desc",
+                    "papers": [
+                        {{
+                            "paper_id": {self.paper1.id},
+                            "paper_title": "Paper Alpha",
+                            "discussion": "Discussion",
+                            "sources": [{{"paper_id": {self.paper1.id}, "chunk_id": {self.chunk1.id}}}]
+                        }}
+                    ],
+                    "cross_paper_observation": "Obs"
+                }}
+            ]
+        }}"""
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_resp):
+
+            generate_thematic_analysis(
+                question="Themes",
+                papers=[self.paper1, self.paper2],
+            )
+
+            # Assert 0 database writes to messages or evidence
+            self.assertEqual(ResearchMessage.objects.count(), initial_messages)
+            self.assertEqual(ResearchEvidence.objects.count(), initial_evidence)
+
+
+class CrossPaperThematicAnalysisAPITests(TestCase):
+    """
+    Focused API tests for Phase 7.2.2: Cross-Paper Thematic Analysis REST API endpoint
+    POST /api/ai/thematic-analysis/
+    Verifies authentication, paper bounds, duplicates, ownership, cross-project checks,
+    optional session validation, standalone non-persistence, session persistence,
+    evidence deduplication, atomic rollback, and error handling.
+    """
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+        self.client = APIClient()
+
+        self.user1 = User.objects.create_user(username="thematic_api_user1", password="password")
+        self.user2 = User.objects.create_user(username="thematic_api_user2", password="password")
+
+        self.proj1 = Project.objects.create(owner=self.user1, title="User1 Project")
+        self.proj2 = Project.objects.create(owner=self.user2, title="User2 Project")
+
+        self.paper1 = Paper.objects.create(project=self.proj1, title="Paper Alpha")
+        self.paper2 = Paper.objects.create(project=self.proj1, title="Paper Beta")
+        self.paper3 = Paper.objects.create(project=self.proj1, title="Paper Gamma")
+        self.paper4 = Paper.objects.create(project=self.proj1, title="Paper Delta")
+        self.paper5 = Paper.objects.create(project=self.proj1, title="Paper Epsilon")
+
+        self.other_paper = Paper.objects.create(project=self.proj2, title="Other User Paper")
+
+        self.session1 = ResearchSession.objects.create(project=self.proj1, title="Thematic Session 1")
+        self.session2 = ResearchSession.objects.create(project=self.proj2, title="Thematic Session 2")
+
+        self.chunk1 = PaperChunk.objects.create(
+            paper=self.paper1,
+            chunk_index=0,
+            page_number=3,
+            text="Paper Alpha chunk text",
+            embedding=[0.1] * 384
+        )
+        self.chunk2 = PaperChunk.objects.create(
+            paper=self.paper2,
+            chunk_index=0,
+            page_number=7,
+            text="Paper Beta chunk text",
+            embedding=[0.2] * 384
+        )
+
+        self.mock_thematic_response = {
+            "question": "What cross-paper themes emerge?",
+            "papers": [
+                {"paper_id": self.paper1.id, "title": self.paper1.title},
+                {"paper_id": self.paper2.id, "title": self.paper2.title}
+            ],
+            "thematic_analysis": {
+                "overall_synthesis": "Both papers examine scalable transformer models.",
+                "themes": [
+                    {
+                        "theme": "Attention Optimization",
+                        "description": "Techniques for efficient attention.",
+                        "papers": [
+                            {
+                                "paper_id": self.paper1.id,
+                                "paper_title": self.paper1.title,
+                                "discussion": "Paper Alpha uses linear attention.",
+                                "sources": [
+                                    {
+                                        "paper_id": self.paper1.id,
+                                        "chunk_id": self.chunk1.id,
+                                        "page_number": 3,
+                                        "text": "Paper Alpha chunk text"
+                                    }
+                                ]
+                            }
+                        ],
+                        "cross_paper_observation": "Alpha adopts linear attention."
+                    }
+                ]
+            }
+        }
+
+    def test_authenticated_successful_request(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+
+        with patch("ai.views.generate_thematic_analysis", return_value=self.mock_thematic_response) as mock_service:
+            resp = self.client.post("/api/ai/thematic-analysis/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+                "question": "What cross-paper themes emerge?"
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            self.assertEqual(len(data["papers"]), 2)
+            self.assertIn("thematic_analysis", data)
+            self.assertEqual(data["thematic_analysis"]["overall_synthesis"], "Both papers examine scalable transformer models.")
+            self.assertEqual(mock_service.call_count, 1)
+
+    def test_unauthenticated_request_returns_401(self):
+        resp = self.client.post("/api/ai/thematic-analysis/", {
+            "paper_ids": [self.paper1.id, self.paper2.id]
+        }, format="json")
+        self.assertEqual(resp.status_code, 401)
+
+    def test_2_paper_request(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+
+        with patch("ai.views.generate_thematic_analysis", return_value=self.mock_thematic_response):
+            resp = self.client.post("/api/ai/thematic-analysis/", {
+                "paper_ids": [self.paper1.id, self.paper2.id]
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(len(resp.json()["papers"]), 2)
+
+    def test_4_paper_request(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+
+        four_paper_resp = {
+            "question": "Themes",
+            "papers": [
+                {"paper_id": self.paper1.id, "title": self.paper1.title},
+                {"paper_id": self.paper2.id, "title": self.paper2.title},
+                {"paper_id": self.paper3.id, "title": self.paper3.title},
+                {"paper_id": self.paper4.id, "title": self.paper4.title},
+            ],
+            "thematic_analysis": {
+                "overall_synthesis": "Four papers evaluated.",
+                "themes": []
+            }
+        }
+
+        with patch("ai.views.generate_thematic_analysis", return_value=four_paper_resp):
+            resp = self.client.post("/api/ai/thematic-analysis/", {
+                "paper_ids": [self.paper1.id, self.paper2.id, self.paper3.id, self.paper4.id]
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(len(resp.json()["papers"]), 4)
+
+    def test_fewer_than_2_papers_returns_400(self):
+        self.client.force_authenticate(user=self.user1)
+
+        resp_empty = self.client.post("/api/ai/thematic-analysis/", {"paper_ids": []}, format="json")
+        self.assertEqual(resp_empty.status_code, 400)
+
+        resp_single = self.client.post("/api/ai/thematic-analysis/", {"paper_ids": [self.paper1.id]}, format="json")
+        self.assertEqual(resp_single.status_code, 400)
+        self.assertIn("requires between 2 and 4 papers", resp_single.json()["error"])
+
+    def test_more_than_4_papers_returns_400(self):
+        self.client.force_authenticate(user=self.user1)
+
+        resp = self.client.post("/api/ai/thematic-analysis/", {
+            "paper_ids": [self.paper1.id, self.paper2.id, self.paper3.id, self.paper4.id, self.paper5.id]
+        }, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("requires between 2 and 4 papers", resp.json()["error"])
+
+    def test_duplicate_paper_ids_returns_400(self):
+        self.client.force_authenticate(user=self.user1)
+
+        resp = self.client.post("/api/ai/thematic-analysis/", {
+            "paper_ids": [self.paper1.id, self.paper1.id]
+        }, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("Duplicate paper IDs", resp.json()["error"])
+
+    def test_nonexistent_paper_id_returns_404(self):
+        self.client.force_authenticate(user=self.user1)
+
+        resp = self.client.post("/api/ai/thematic-analysis/", {
+            "paper_ids": [self.paper1.id, 999999]
+        }, format="json")
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.json()["code"], "NOT_FOUND")
+
+    def test_unauthorized_paper_returns_403(self):
+        self.client.force_authenticate(user=self.user1)
+
+        resp = self.client.post("/api/ai/thematic-analysis/", {
+            "paper_ids": [self.paper1.id, self.other_paper.id]
+        }, format="json")
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()["code"], "FORBIDDEN")
+
+    def test_invalid_or_missing_paper_ids_format_returns_400(self):
+        self.client.force_authenticate(user=self.user1)
+
+        resp_missing = self.client.post("/api/ai/thematic-analysis/", {}, format="json")
+        self.assertEqual(resp_missing.status_code, 400)
+        self.assertEqual(resp_missing.json()["code"], "BAD_REQUEST")
+
+        resp_str = self.client.post("/api/ai/thematic-analysis/", {"paper_ids": "not-a-list"}, format="json")
+        self.assertEqual(resp_str.status_code, 400)
+
+        resp_elem_str = self.client.post("/api/ai/thematic-analysis/", {"paper_ids": [self.paper1.id, "string_id"]}, format="json")
+        self.assertEqual(resp_elem_str.status_code, 400)
+
+        resp_elem_bool = self.client.post("/api/ai/thematic-analysis/", {"paper_ids": [self.paper1.id, True]}, format="json")
+        self.assertEqual(resp_elem_bool.status_code, 400)
+
+    def test_default_question_fallback(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+
+        expected_default = (
+            "Identify the major themes, recurring concepts, and important cross-paper patterns across these papers."
+        )
+
+        with patch("ai.views.generate_thematic_analysis", return_value=self.mock_thematic_response) as mock_service:
+            resp = self.client.post("/api/ai/thematic-analysis/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+                "question": "   "
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            mock_service.assert_called_once()
+            called_question = mock_service.call_args.kwargs["question"]
+            self.assertEqual(called_question, expected_default)
+
+    def test_custom_question_passed_to_service(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+
+        custom_q = "Compare attention vs state space models in these papers."
+
+        with patch("ai.views.generate_thematic_analysis", return_value=self.mock_thematic_response) as mock_service:
+            resp = self.client.post("/api/ai/thematic-analysis/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+                "question": custom_q
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            mock_service.assert_called_once()
+            called_question = mock_service.call_args.kwargs["question"]
+            self.assertEqual(called_question, custom_q)
+
+    def test_standalone_request_does_not_persist_messages_or_evidence(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+        from ai.models import ResearchMessage, ResearchEvidence
+
+        initial_msg_count = ResearchMessage.objects.count()
+        initial_ev_count = ResearchEvidence.objects.count()
+
+        with patch("ai.views.generate_thematic_analysis", return_value=self.mock_thematic_response):
+            resp = self.client.post("/api/ai/thematic-analysis/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            self.assertNotIn("session_id", resp.json())
+            self.assertEqual(ResearchMessage.objects.count(), initial_msg_count)
+            self.assertEqual(ResearchEvidence.objects.count(), initial_ev_count)
+
+    def test_valid_session_persistence(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+        from ai.models import ResearchMessage
+        import json
+
+        initial_msg_count = ResearchMessage.objects.filter(session=self.session1).count()
+
+        with patch("ai.views.generate_thematic_analysis", return_value=self.mock_thematic_response):
+            resp = self.client.post("/api/ai/thematic-analysis/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+                "question": "What cross-paper themes emerge?",
+                "session_id": self.session1.id
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(resp.json()["session_id"], self.session1.id)
+            self.assertEqual(ResearchMessage.objects.filter(session=self.session1).count(), initial_msg_count + 2)
+
+            user_msg = ResearchMessage.objects.filter(session=self.session1, role=ResearchMessage.ROLE_USER).last()
+            self.assertEqual(user_msg.content, "What cross-paper themes emerge?")
+
+            asst_msg = ResearchMessage.objects.filter(session=self.session1, role=ResearchMessage.ROLE_ASSISTANT).last()
+            parsed_content = json.loads(asst_msg.content)
+            self.assertEqual(parsed_content["overall_synthesis"], "Both papers examine scalable transformer models.")
+
+    def test_session_ownership_protection(self):
+        self.client.force_authenticate(user=self.user1)
+
+        resp = self.client.post("/api/ai/thematic-analysis/", {
+            "paper_ids": [self.paper1.id, self.paper2.id],
+            "session_id": self.session2.id
+        }, format="json")
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()["code"], "FORBIDDEN")
+
+    def test_cross_project_paper_and_session_rejection(self):
+        self.client.force_authenticate(user=self.user1)
+
+        proj1_b = Project.objects.create(owner=self.user1, title="User1 Project B")
+        paper_1b = Paper.objects.create(project=proj1_b, title="Project B Paper")
+
+        resp = self.client.post("/api/ai/thematic-analysis/", {
+            "paper_ids": [self.paper1.id, paper_1b.id],
+            "session_id": self.session1.id
+        }, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("do not belong to this research session", resp.json()["error"])
+
+    def test_nonexistent_or_invalid_session_id_returns_404(self):
+        self.client.force_authenticate(user=self.user1)
+
+        resp_nonexistent = self.client.post("/api/ai/thematic-analysis/", {
+            "paper_ids": [self.paper1.id, self.paper2.id],
+            "session_id": 999999
+        }, format="json")
+        self.assertEqual(resp_nonexistent.status_code, 404)
+        self.assertEqual(resp_nonexistent.json()["code"], "NOT_FOUND")
+
+        resp_invalid_str = self.client.post("/api/ai/thematic-analysis/", {
+            "paper_ids": [self.paper1.id, self.paper2.id],
+            "session_id": "not-an-id"
+        }, format="json")
+        self.assertEqual(resp_invalid_str.status_code, 404)
+
+    def test_research_evidence_saved_and_deduplicated(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+        from ai.models import ResearchEvidence, ResearchMessage
+
+        source_p1 = {
+            "chunk_id": self.chunk1.id,
+            "paper_id": self.paper1.id,
+            "page_number": 3,
+            "text": "Paper Alpha chunk text",
+        }
+        source_p2 = {
+            "chunk_id": self.chunk2.id,
+            "paper_id": self.paper2.id,
+            "page_number": 7,
+            "text": "Paper Beta chunk text",
+        }
+
+        mock_thematic = {
+            "question": "Thematic question",
+            "papers": [
+                {"paper_id": self.paper1.id, "title": self.paper1.title},
+                {"paper_id": self.paper2.id, "title": self.paper2.title}
+            ],
+            "thematic_analysis": {
+                "overall_synthesis": "Synthesis across themes.",
+                "themes": [
+                    {
+                        "theme": "Theme 1",
+                        "description": "Desc 1",
+                        "papers": [
+                            {"paper_id": self.paper1.id, "paper_title": self.paper1.title, "discussion": "Disc 1", "sources": [source_p1]}
+                        ],
+                        "cross_paper_observation": "Obs 1"
+                    },
+                    {
+                        "theme": "Theme 2",
+                        "description": "Desc 2",
+                        "papers": [
+                            # Duplicate source_p1 referenced in Theme 2 as well!
+                            {"paper_id": self.paper1.id, "paper_title": self.paper1.title, "discussion": "Disc 2", "sources": [source_p1]},
+                            {"paper_id": self.paper2.id, "paper_title": self.paper2.title, "discussion": "Disc 3", "sources": [source_p2]}
+                        ],
+                        "cross_paper_observation": "Obs 2"
+                    }
+                ]
+            }
+        }
+
+        with patch("ai.views.generate_thematic_analysis", return_value=mock_thematic):
+            resp = self.client.post("/api/ai/thematic-analysis/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+                "session_id": self.session1.id
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+
+            asst_msg = ResearchMessage.objects.filter(session=self.session1, role=ResearchMessage.ROLE_ASSISTANT).last()
+            evidence_records = ResearchEvidence.objects.filter(message=asst_msg)
+
+            # Exactly 2 unique evidence records should be created (source_p1 deduplicated across themes)
+            self.assertEqual(evidence_records.count(), 2)
+
+            evidence_chunk_ids = set(evidence_records.values_list("chunk_id", flat=True))
+            self.assertIn(self.chunk1.id, evidence_chunk_ids)
+            self.assertIn(self.chunk2.id, evidence_chunk_ids)
+
+            ev_p1 = evidence_records.get(chunk=self.chunk1)
+            self.assertEqual(ev_p1.paper, self.paper1)
+            self.assertEqual(ev_p1.page_number, 3)
+            self.assertEqual(ev_p1.text, "Paper Alpha chunk text")
+
+    def test_transaction_rollback_on_synthesis_failure(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+        from ai.models import ResearchMessage, ResearchEvidence
+
+        initial_msg_count = ResearchMessage.objects.filter(session=self.session1).count()
+        initial_ev_count = ResearchEvidence.objects.count()
+
+        with patch("ai.views.generate_thematic_analysis", side_effect=Exception("Thematic model failed")):
+            resp = self.client.post("/api/ai/thematic-analysis/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+                "session_id": self.session1.id
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 500)
+            # Transaction must have rolled back - 0 new messages or evidence
+            self.assertEqual(ResearchMessage.objects.filter(session=self.session1).count(), initial_msg_count)
+            self.assertEqual(ResearchEvidence.objects.count(), initial_ev_count)
+
+    def test_exactly_one_service_invocation(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+
+        with patch("ai.views.generate_thematic_analysis", return_value=self.mock_thematic_response) as mock_service:
+            resp = self.client.post("/api/ai/thematic-analysis/", {
+                "paper_ids": [self.paper1.id, self.paper2.id]
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(mock_service.call_count, 1)
+
+
+
+
 
 
 
