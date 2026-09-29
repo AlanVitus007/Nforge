@@ -3281,6 +3281,747 @@ class CrossPaperThematicAnalysisAPITests(TestCase):
             self.assertEqual(mock_service.call_count, 1)
 
 
+class ResearchTrendAnalysisServiceTest(TestCase):
+    """
+    Focused unit tests for Phase 7.3.1: Research Trend Analysis backend service.
+    Verifies structured schema, multi-paper retrieval reuse, single Gemini call,
+    parsing robustness, source reference resolution, page number preservation,
+    chronological date handling, boundary handling, and pure service behavior.
+    """
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="trend_user", password="password")
+        self.project = Project.objects.create(owner=self.user, title="Trend Analysis Project")
+
+        self.paper1 = Paper.objects.create(project=self.project, title="Paper Alpha")
+        self.paper2 = Paper.objects.create(project=self.project, title="Paper Beta")
+        self.paper3 = Paper.objects.create(project=self.project, title="Paper Gamma")
+        self.paper4 = Paper.objects.create(project=self.project, title="Paper Delta")
+
+        self.chunk1 = PaperChunk.objects.create(
+            paper=self.paper1,
+            chunk_index=0,
+            page_number=5,
+            text="Paper Alpha proposes recurrent attention models.",
+            embedding=[0.1] * 384,
+        )
+        self.chunk2 = PaperChunk.objects.create(
+            paper=self.paper2,
+            chunk_index=0,
+            page_number=12,
+            text="Paper Beta transitions towards multi-head self-attention mechanisms.",
+            embedding=[0.1] * 384,
+        )
+        self.chunk3 = PaperChunk.objects.create(
+            paper=self.paper3,
+            chunk_index=0,
+            page_number=20,
+            text="Paper Gamma scales self-attention models with sparse computation.",
+            embedding=[0.1] * 384,
+        )
+        self.chunk4 = PaperChunk.objects.create(
+            paper=self.paper4,
+            chunk_index=0,
+            page_number=8,
+            text="Paper Delta demonstrates linear-time state space models.",
+            embedding=[0.1] * 384,
+        )
+
+    def test_valid_trend_analysis_json(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_research_trend_analysis
+
+        mock_gemini_response = MagicMock()
+        mock_gemini_response.text = f"""{{
+            "overall_trend": "Research shifts from recurrent formulations to scalable self-attention.",
+            "research_evolution": [
+                {{
+                    "trend": "Attention Scalability",
+                    "description": "Progressive optimization of sequence modeling architectures.",
+                    "papers": [
+                        {{
+                            "paper_id": {self.paper1.id},
+                            "paper_title": "Paper Alpha",
+                            "observation": "Alpha establishes recurrent attention baselines.",
+                            "sources": [
+                                {{"paper_id": {self.paper1.id}, "chunk_id": {self.chunk1.id}}}
+                            ]
+                        }},
+                        {{
+                            "paper_id": {self.paper2.id},
+                            "paper_title": "Paper Beta",
+                            "observation": "Beta shifts from recurrence to multi-head self-attention.",
+                            "sources": [
+                                {{"paper_id": {self.paper2.id}, "chunk_id": {self.chunk2.id}}}
+                            ]
+                        }}
+                    ],
+                    "evolution_observation": "Alpha laid recurrent foundations while Beta removed sequential recurrence."
+                }}
+            ],
+            "emerging_directions": [
+                {{
+                    "direction": "Sparse Sequence Computation",
+                    "description": "Exploration of sparse patterns to mitigate quadratic overhead.",
+                    "sources": [
+                        {{"paper_id": {self.paper2.id}, "chunk_id": {self.chunk2.id}}}
+                    ]
+                }}
+            ],
+            "methodology_evolution": [
+                {{
+                    "aspect": "Sequence Processing Paradigm",
+                    "description": "Evolution from step-by-step recurrence to parallel self-attention layers.",
+                    "sources": [
+                        {{"paper_id": {self.paper1.id}, "chunk_id": {self.chunk1.id}}}
+                    ]
+                }}
+            ],
+            "future_directions": [
+                {{
+                    "direction": "Linear-complexity Attention Alternatives",
+                    "description": "Investigating sub-quadratic attention variants for ultra-long context.",
+                    "sources": [
+                        {{"paper_id": {self.paper2.id}, "chunk_id": {self.chunk2.id}}}
+                    ]
+                }}
+            ]
+        }}"""
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_gemini_response) as mock_gemini:
+
+            result = generate_research_trend_analysis(
+                question="How does attention architecture evolve across these papers?",
+                papers=[self.paper1, self.paper2],
+            )
+
+            self.assertEqual(mock_gemini.call_count, 1)
+            self.assertIn("trend_analysis", result)
+            trend = result["trend_analysis"]
+
+            self.assertEqual(trend["overall_trend"], "Research shifts from recurrent formulations to scalable self-attention.")
+            self.assertEqual(len(trend["research_evolution"]), 1)
+
+            t1 = trend["research_evolution"][0]
+            self.assertEqual(t1["trend"], "Attention Scalability")
+            self.assertEqual(t1["description"], "Progressive optimization of sequence modeling architectures.")
+            self.assertEqual(t1["evolution_observation"], "Alpha laid recurrent foundations while Beta removed sequential recurrence.")
+            self.assertEqual(len(t1["papers"]), 2)
+
+            p1 = t1["papers"][0]
+            self.assertEqual(p1["paper_id"], self.paper1.id)
+            self.assertEqual(p1["paper_title"], "Paper Alpha")
+            self.assertEqual(p1["observation"], "Alpha establishes recurrent attention baselines.")
+            self.assertEqual(len(p1["sources"]), 1)
+            self.assertEqual(p1["sources"][0]["chunk_id"], self.chunk1.id)
+            self.assertEqual(p1["sources"][0]["page_number"], 5)
+            self.assertEqual(p1["sources"][0]["paper_id"], self.paper1.id)
+            self.assertIn("Paper Alpha proposes recurrent", p1["sources"][0]["text"])
+
+            p2 = t1["papers"][1]
+            self.assertEqual(p2["paper_id"], self.paper2.id)
+            self.assertEqual(p2["sources"][0]["chunk_id"], self.chunk2.id)
+            self.assertEqual(p2["sources"][0]["page_number"], 12)
+
+            # emerging_directions
+            self.assertEqual(len(trend["emerging_directions"]), 1)
+            em = trend["emerging_directions"][0]
+            self.assertEqual(em["direction"], "Sparse Sequence Computation")
+            self.assertEqual(len(em["sources"]), 1)
+            self.assertEqual(em["sources"][0]["chunk_id"], self.chunk2.id)
+
+            # methodology_evolution
+            self.assertEqual(len(trend["methodology_evolution"]), 1)
+            meth = trend["methodology_evolution"][0]
+            self.assertEqual(meth["aspect"], "Sequence Processing Paradigm")
+            self.assertEqual(len(meth["sources"]), 1)
+            self.assertEqual(meth["sources"][0]["chunk_id"], self.chunk1.id)
+
+            # future_directions
+            self.assertEqual(len(trend["future_directions"]), 1)
+            fut = trend["future_directions"][0]
+            self.assertEqual(fut["direction"], "Linear-complexity Attention Alternatives")
+            self.assertEqual(len(fut["sources"]), 1)
+            self.assertEqual(fut["sources"][0]["chunk_id"], self.chunk2.id)
+
+    def test_code_fenced_json(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_research_trend_analysis, parse_research_trend_analysis_json
+
+        fenced_input = f"""```json
+        {{
+            "overall_trend": "Fenced trend synthesis.",
+            "research_evolution": [
+                {{
+                    "trend": "Fenced Trend",
+                    "description": "Fenced Description",
+                    "papers": [
+                        {{
+                            "paper_id": {self.paper1.id},
+                            "paper_title": "Paper Alpha",
+                            "observation": "Observation Alpha",
+                            "sources": [{{"paper_id": {self.paper1.id}, "chunk_id": {self.chunk1.id}}}]
+                        }}
+                    ],
+                    "evolution_observation": "Observation"
+                }}
+            ],
+            "emerging_directions": [],
+            "methodology_evolution": [],
+            "future_directions": []
+        }}
+        ```"""
+
+        # Direct parser check
+        direct_parsed = parse_research_trend_analysis_json(fenced_input)
+        self.assertEqual(direct_parsed["overall_trend"], "Fenced trend synthesis.")
+        self.assertEqual(len(direct_parsed["research_evolution"]), 1)
+
+        # Service execution check
+        mock_resp = MagicMock()
+        mock_resp.text = fenced_input
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_resp):
+
+            result = generate_research_trend_analysis(
+                question="Trend inquiry",
+                papers=[self.paper1, self.paper2],
+            )
+            self.assertEqual(result["overall_trend"], "Fenced trend synthesis.")
+            self.assertEqual(len(result["research_evolution"]), 1)
+            self.assertEqual(result["research_evolution"][0]["trend"], "Fenced Trend")
+
+    def test_malformed_json_fallback(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_research_trend_analysis, parse_research_trend_analysis_json
+
+        # Direct parser test
+        direct_parsed = parse_research_trend_analysis_json("Not a json string { broken")
+        self.assertEqual(direct_parsed["overall_trend"], "Research trend analysis unavailable based on the provided evidence.")
+        self.assertEqual(direct_parsed["research_evolution"], [])
+        self.assertEqual(direct_parsed["emerging_directions"], [])
+        self.assertEqual(direct_parsed["methodology_evolution"], [])
+        self.assertEqual(direct_parsed["future_directions"], [])
+
+        # Service test
+        mock_resp = MagicMock()
+        mock_resp.text = "Completely broken response from LLM"
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_resp):
+
+            result = generate_research_trend_analysis(
+                question="Trends",
+                papers=[self.paper1, self.paper2],
+            )
+            self.assertEqual(result["overall_trend"], "Research trend analysis unavailable based on the provided evidence.")
+            self.assertEqual(result["research_evolution"], [])
+            self.assertEqual(result["emerging_directions"], [])
+            self.assertEqual(result["methodology_evolution"], [])
+            self.assertEqual(result["future_directions"], [])
+
+    def test_missing_top_level_categories(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_research_trend_analysis, parse_research_trend_analysis_json
+
+        # Only overall_trend is provided, all lists are missing
+        input_json = '{"overall_trend": "Only overall trend provided"}'
+        parsed = parse_research_trend_analysis_json(input_json)
+        self.assertEqual(parsed["overall_trend"], "Only overall trend provided")
+        self.assertEqual(parsed["research_evolution"], [])
+        self.assertEqual(parsed["emerging_directions"], [])
+        self.assertEqual(parsed["methodology_evolution"], [])
+        self.assertEqual(parsed["future_directions"], [])
+
+        mock_resp = MagicMock()
+        mock_resp.text = input_json
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_resp):
+
+            result = generate_research_trend_analysis(
+                question="Trends",
+                papers=[self.paper1, self.paper2],
+            )
+            self.assertEqual(result["overall_trend"], "Only overall trend provided")
+            self.assertEqual(result["research_evolution"], [])
+            self.assertEqual(result["emerging_directions"], [])
+            self.assertEqual(result["methodology_evolution"], [])
+            self.assertEqual(result["future_directions"], [])
+
+    def test_malformed_category_entries(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_research_trend_analysis, parse_research_trend_analysis_json
+
+        # Category entries with non-dict items and partial dict items
+        input_json = """{
+            "overall_trend": "Handling malformed items",
+            "research_evolution": [
+                "not-a-dict",
+                12345,
+                {
+                    "trend": "Sparse Trend",
+                    "papers": [
+                        "not-a-paper-dict",
+                        {"paper_id": 1}
+                    ]
+                }
+            ],
+            "emerging_directions": [
+                "malformed-string",
+                {"direction": "Emerging X"}
+            ],
+            "methodology_evolution": [
+                null,
+                {"aspect": "Methodology Y"}
+            ],
+            "future_directions": [
+                ["nested-list"],
+                {"direction": "Future Z"}
+            ]
+        }"""
+        parsed = parse_research_trend_analysis_json(input_json)
+        self.assertEqual(len(parsed["research_evolution"]), 1)
+        self.assertEqual(parsed["research_evolution"][0]["trend"], "Sparse Trend")
+        self.assertEqual(parsed["research_evolution"][0]["description"], "No detailed description provided.")
+        self.assertEqual(len(parsed["research_evolution"][0]["papers"]), 1)
+        self.assertEqual(parsed["research_evolution"][0]["papers"][0]["paper_id"], 1)
+
+        self.assertEqual(len(parsed["emerging_directions"]), 1)
+        self.assertEqual(parsed["emerging_directions"][0]["direction"], "Emerging X")
+
+        self.assertEqual(len(parsed["methodology_evolution"]), 1)
+        self.assertEqual(parsed["methodology_evolution"][0]["aspect"], "Methodology Y")
+
+        self.assertEqual(len(parsed["future_directions"]), 1)
+        self.assertEqual(parsed["future_directions"][0]["direction"], "Future Z")
+
+    def test_invalid_source_references_filtered_out(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_research_trend_analysis
+
+        mock_resp = MagicMock()
+        mock_resp.text = f"""{{
+            "overall_trend": "Invalid sources test",
+            "research_evolution": [
+                {{
+                    "trend": "Trend with Fabricated Chunk",
+                    "description": "Desc",
+                    "papers": [
+                        {{
+                            "paper_id": {self.paper1.id},
+                            "paper_title": "Paper Alpha",
+                            "observation": "Observation",
+                            "sources": [
+                                {{"paper_id": {self.paper1.id}, "chunk_id": 999999}},
+                                {{"paper_id": {self.paper1.id}, "chunk_id": {self.chunk1.id}}}
+                            ]
+                        }}
+                    ],
+                    "evolution_observation": "Obs"
+                }}
+            ],
+            "emerging_directions": [
+                {{
+                    "direction": "Emerging",
+                    "description": "Desc",
+                    "sources": [
+                        {{"paper_id": {self.paper1.id}, "chunk_id": 888888}}
+                    ]
+                }}
+            ],
+            "methodology_evolution": [],
+            "future_directions": []
+        }}"""
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_resp):
+
+            result = generate_research_trend_analysis(
+                question="Trends",
+                papers=[self.paper1, self.paper2],
+            )
+            # In research_evolution, 999999 should be filtered out, leaving only chunk1
+            sources = result["research_evolution"][0]["papers"][0]["sources"]
+            self.assertEqual(len(sources), 1)
+            self.assertEqual(sources[0]["chunk_id"], self.chunk1.id)
+            self.assertEqual(sources[0]["paper_id"], self.paper1.id)
+
+            # In emerging_directions, 888888 should be filtered out, leaving 0 sources
+            em_sources = result["emerging_directions"][0]["sources"]
+            self.assertEqual(len(em_sources), 0)
+
+    def test_mismatched_paper_ids_filtered(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_research_trend_analysis
+
+        mock_resp = MagicMock()
+        mock_resp.text = f"""{{
+            "overall_trend": "Mismatched paper ID test",
+            "research_evolution": [
+                {{
+                    "trend": "Trend Mismatch",
+                    "description": "Desc",
+                    "papers": [
+                        {{
+                            "paper_id": {self.paper1.id},
+                            "paper_title": "Paper Alpha",
+                            "observation": "Observation",
+                            "sources": [
+                                {{"paper_id": {self.paper2.id}, "chunk_id": {self.chunk1.id}}}
+                            ]
+                        }}
+                    ],
+                    "evolution_observation": "Obs"
+                }}
+            ],
+            "emerging_directions": [],
+            "methodology_evolution": [],
+            "future_directions": []
+        }}"""
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_resp):
+
+            result = generate_research_trend_analysis(
+                question="Trends",
+                papers=[self.paper1, self.paper2],
+            )
+            # chunk1 belongs to paper1, but ref specified paper2 -> filtered out
+            sources = result["research_evolution"][0]["papers"][0]["sources"]
+            self.assertEqual(len(sources), 0)
+
+    def test_valid_source_references_resolved(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_research_trend_analysis
+
+        mock_resp = MagicMock()
+        mock_resp.text = f"""{{
+            "overall_trend": "Valid sources test",
+            "research_evolution": [
+                {{
+                    "trend": "Trend A",
+                    "description": "Desc A",
+                    "papers": [
+                        {{
+                            "paper_id": {self.paper1.id},
+                            "paper_title": "Paper Alpha",
+                            "observation": "Obs 1",
+                            "sources": [
+                                {{"paper_id": {self.paper1.id}, "chunk_id": {self.chunk1.id}}}
+                            ]
+                        }},
+                        {{
+                            "paper_id": {self.paper2.id},
+                            "paper_title": "Paper Beta",
+                            "observation": "Obs 2",
+                            "sources": [
+                                {{"paper_id": {self.paper2.id}, "chunk_id": {self.chunk2.id}}}
+                            ]
+                        }}
+                    ],
+                    "evolution_observation": "Obs"
+                }}
+            ],
+            "emerging_directions": [],
+            "methodology_evolution": [],
+            "future_directions": []
+        }}"""
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_resp):
+
+            result = generate_research_trend_analysis(
+                question="Trends",
+                papers=[self.paper1, self.paper2],
+            )
+            papers = result["research_evolution"][0]["papers"]
+            self.assertEqual(len(papers[0]["sources"]), 1)
+            self.assertEqual(papers[0]["sources"][0]["chunk_id"], self.chunk1.id)
+            self.assertEqual(papers[0]["sources"][0]["page_number"], 5)
+            self.assertEqual(papers[0]["sources"][0]["paper_id"], self.paper1.id)
+            self.assertIn("Paper Alpha proposes recurrent", papers[0]["sources"][0]["text"])
+
+            self.assertEqual(len(papers[1]["sources"]), 1)
+            self.assertEqual(papers[1]["sources"][0]["chunk_id"], self.chunk2.id)
+            self.assertEqual(papers[1]["sources"][0]["page_number"], 12)
+            self.assertEqual(papers[1]["sources"][0]["paper_id"], self.paper2.id)
+
+    def test_two_paper_input_boundary(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_research_trend_analysis
+
+        mock_resp = MagicMock()
+        mock_resp.text = '{"overall_trend": "2 papers analyzed.", "research_evolution": [], "emerging_directions": [], "methodology_evolution": [], "future_directions": []}'
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_resp):
+
+            result = generate_research_trend_analysis(
+                question="Trends",
+                papers=[self.paper1, self.paper2],
+            )
+            self.assertEqual(len(result["papers"]), 2)
+            self.assertEqual(result["overall_trend"], "2 papers analyzed.")
+
+    def test_four_paper_input_boundary(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_research_trend_analysis
+
+        mock_resp = MagicMock()
+        mock_resp.text = '{"overall_trend": "4 papers analyzed.", "research_evolution": [], "emerging_directions": [], "methodology_evolution": [], "future_directions": []}'
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_resp):
+
+            result = generate_research_trend_analysis(
+                question="Trends",
+                papers=[self.paper1, self.paper2, self.paper3, self.paper4],
+            )
+            self.assertEqual(len(result["papers"]), 4)
+            self.assertEqual(result["overall_trend"], "4 papers analyzed.")
+
+    def test_rejection_fewer_than_two_papers(self):
+        from ai.services import generate_research_trend_analysis
+
+        # 0 papers
+        with self.assertRaises(ValueError) as ctx:
+            generate_research_trend_analysis("Trends", [])
+        self.assertIn("non-empty list", str(ctx.exception))
+
+        # 1 paper
+        with self.assertRaises(ValueError) as ctx:
+            generate_research_trend_analysis("Trends", [self.paper1])
+        self.assertIn("requires between 2 and 4 papers", str(ctx.exception))
+
+    def test_rejection_more_than_four_papers(self):
+        from ai.services import generate_research_trend_analysis
+
+        paper5 = Paper.objects.create(project=self.project, title="Paper Epsilon")
+        with self.assertRaises(ValueError) as ctx:
+            generate_research_trend_analysis("Trends", [self.paper1, self.paper2, self.paper3, self.paper4, paper5])
+        self.assertIn("requires between 2 and 4 papers", str(ctx.exception))
+
+    def test_rejection_duplicate_papers(self):
+        from ai.services import generate_research_trend_analysis
+
+        with self.assertRaises(ValueError) as ctx:
+            generate_research_trend_analysis("Trends", [self.paper1, self.paper1])
+        self.assertIn("unique Paper instances", str(ctx.exception))
+
+        with self.assertRaises(ValueError) as ctx:
+            generate_research_trend_analysis("Trends", [self.paper1, self.paper2, self.paper1])
+        self.assertIn("unique Paper instances", str(ctx.exception))
+
+    def test_rejection_non_paper_instances(self):
+        from ai.services import generate_research_trend_analysis
+
+        with self.assertRaises(ValueError) as ctx:
+            generate_research_trend_analysis("Trends", [self.paper1, "not-a-paper"])
+        self.assertIn("must be a valid Paper instance", str(ctx.exception))
+
+    def test_exactly_one_gemini_call(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_research_trend_analysis
+
+        mock_resp = MagicMock()
+        mock_resp.text = '{"overall_trend": "Single call test.", "research_evolution": [], "emerging_directions": [], "methodology_evolution": [], "future_directions": []}'
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_resp) as mock_gemini:
+
+            generate_research_trend_analysis(
+                question="Trends",
+                papers=[self.paper1, self.paper2],
+            )
+            self.assertEqual(mock_gemini.call_count, 1)
+
+    def test_retrieval_is_reused_rather_than_duplicated(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_research_trend_analysis
+
+        mock_resp = MagicMock()
+        mock_resp.text = '{"overall_trend": "Retrieval reuse test.", "research_evolution": [], "emerging_directions": [], "methodology_evolution": [], "future_directions": []}'
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.retrieve_multi_paper_evidence", wraps=None) as mock_retrieval, \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_resp):
+
+            mock_retrieval.return_value = [
+                {"paper_id": self.paper1.id, "paper_title": self.paper1.title, "sources": [{"chunk_id": self.chunk1.id, "page_number": 5, "text": "Alpha text"}]},
+                {"paper_id": self.paper2.id, "paper_title": self.paper2.title, "sources": [{"chunk_id": self.chunk2.id, "page_number": 12, "text": "Beta text"}]},
+            ]
+
+            generate_research_trend_analysis(
+                question="Trends",
+                papers=[self.paper1, self.paper2],
+            )
+            self.assertEqual(mock_retrieval.call_count, 1)
+            args, kwargs = mock_retrieval.call_args
+            self.assertEqual(kwargs.get("top_k_per_paper"), 5)
+            self.assertEqual(kwargs.get("papers"), [self.paper1, self.paper2])
+
+    def test_empty_retrieval_chunks_skips_gemini(self):
+        from unittest.mock import patch
+        from ai.services import generate_research_trend_analysis
+
+        empty_paper_a = Paper.objects.create(project=self.project, title="Empty Paper A")
+        empty_paper_b = Paper.objects.create(project=self.project, title="Empty Paper B")
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini") as mock_gemini:
+
+            result = generate_research_trend_analysis(
+                question="Trends",
+                papers=[empty_paper_a, empty_paper_b],
+            )
+            self.assertEqual(mock_gemini.call_count, 0)
+            self.assertIn("Insufficient text content", result["overall_trend"])
+            self.assertEqual(result["research_evolution"], [])
+            self.assertEqual(result["emerging_directions"], [])
+            self.assertEqual(result["methodology_evolution"], [])
+            self.assertEqual(result["future_directions"], [])
+
+    def test_no_database_writes_performed(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_research_trend_analysis
+        from ai.models import ResearchMessage, ResearchEvidence
+
+        initial_messages = ResearchMessage.objects.count()
+        initial_evidence = ResearchEvidence.objects.count()
+        initial_papers = Paper.objects.count()
+
+        mock_resp = MagicMock()
+        mock_resp.text = f"""{{
+            "overall_trend": "Trend synthesis",
+            "research_evolution": [
+                {{
+                    "trend": "Trend",
+                    "description": "Desc",
+                    "papers": [
+                        {{
+                            "paper_id": {self.paper1.id},
+                            "paper_title": "Paper Alpha",
+                            "observation": "Observation",
+                            "sources": [{{"paper_id": {self.paper1.id}, "chunk_id": {self.chunk1.id}}}]
+                        }}
+                    ],
+                    "evolution_observation": "Obs"
+                }}
+            ],
+            "emerging_directions": [],
+            "methodology_evolution": [],
+            "future_directions": []
+        }}"""
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_resp):
+
+            generate_research_trend_analysis(
+                question="Trends",
+                papers=[self.paper1, self.paper2],
+            )
+
+            # Assert 0 database writes to messages, evidence, or papers
+            self.assertEqual(ResearchMessage.objects.count(), initial_messages)
+            self.assertEqual(ResearchEvidence.objects.count(), initial_evidence)
+            self.assertEqual(Paper.objects.count(), initial_papers)
+
+    def test_publication_year_handling_if_supported(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_research_trend_analysis
+
+        # Simulate paper instances with publication_year attributes
+        self.paper1.publication_year = 2020
+        self.paper2.publication_year = 2023
+
+        mock_resp = MagicMock()
+        mock_resp.text = '{"overall_trend": "Evolution with dates.", "research_evolution": [], "emerging_directions": [], "methodology_evolution": [], "future_directions": []}'
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_resp) as mock_gemini:
+
+            result = generate_research_trend_analysis(
+                question="Trends with publication years",
+                papers=[self.paper1, self.paper2],
+            )
+
+            # Verify publication_year is preserved in returned papers metadata
+            p1_info = next(p for p in result["papers"] if p["paper_id"] == self.paper1.id)
+            p2_info = next(p for p in result["papers"] if p["paper_id"] == self.paper2.id)
+            self.assertEqual(p1_info["publication_year"], 2020)
+            self.assertEqual(p2_info["publication_year"], 2023)
+
+            # Verify prompt received publication year context
+            call_args, call_kwargs = mock_gemini.call_args
+            prompt_text = call_args[1]
+            self.assertIn("Publication Year: 2020", prompt_text)
+            self.assertIn("Publication Year: 2023", prompt_text)
+
+    def test_no_unsupported_chronological_claims_when_dates_unavailable(self):
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_research_trend_analysis
+
+        # Ensure no publication_year attribute
+        if hasattr(self.paper1, "publication_year"):
+            delattr(self.paper1, "publication_year")
+        if hasattr(self.paper2, "publication_year"):
+            delattr(self.paper2, "publication_year")
+
+        mock_resp = MagicMock()
+        mock_resp.text = '{"overall_trend": "No dates.", "research_evolution": [], "emerging_directions": [], "methodology_evolution": [], "future_directions": []}'
+
+        dummy_query_emb = [0.1] * 384
+        with patch("ai.services.generate_embedding", return_value=dummy_query_emb), \
+             patch("os.getenv", return_value="fake-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_resp) as mock_gemini:
+
+            result = generate_research_trend_analysis(
+                question="Trends without publication years",
+                papers=[self.paper1, self.paper2],
+            )
+
+            # Verify returned paper metadata does not have publication_year
+            for p in result["papers"]:
+                self.assertNotIn("publication_year", p)
+
+            # Verify prompt explicitly instructs the LLM not to invent dates
+            call_args, call_kwargs = mock_gemini.call_args
+            prompt_text = call_args[1]
+            self.assertIn("Do NOT invent or assume publication years or dates", prompt_text)
+            self.assertIn("across the selected papers", prompt_text)
+
+
+
 
 
 

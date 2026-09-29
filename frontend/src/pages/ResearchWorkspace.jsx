@@ -261,6 +261,108 @@ const RESEARCH_GAP_SHORTCUTS = [
 
 const DEFAULT_GAP_QUESTION = 'Identify the major research gaps, limitations, unanswered questions, and future research directions across these papers.';
 
+/**
+ * Helper to safely parse and detect structured cross-paper thematic analysis JSON.
+ * Accepts both parsed object and JSON string, and enriches evidence paper titles.
+ */
+function parseStructuredThematicAnalysis(content, papers = []) {
+    let parsed = null;
+
+    if (content && typeof content === 'object') {
+        parsed = content;
+    } else if (typeof content === 'string') {
+        const trimmed = content.trim();
+        if (trimmed.startsWith('{') || trimmed.startsWith('```')) {
+            let jsonStr = trimmed;
+            if (jsonStr.startsWith('```')) {
+                jsonStr = jsonStr.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+            }
+            try {
+                parsed = JSON.parse(jsonStr);
+            } catch {
+                return null;
+            }
+        }
+    }
+
+    if (
+        parsed &&
+        typeof parsed === 'object' &&
+        (parsed.overall_synthesis || Array.isArray(parsed.themes))
+    ) {
+        // Enrich paper titles on sources if paper mapping is available
+        if (papers && papers.length > 0) {
+            const paperMap = {};
+            papers.forEach((p) => {
+                paperMap[p.id] = p.title;
+            });
+
+            if (Array.isArray(parsed.themes)) {
+                parsed.themes.forEach((th) => {
+                    if (th && Array.isArray(th.papers)) {
+                        th.papers.forEach((pEntry) => {
+                            if (pEntry) {
+                                const pTitle = pEntry.paper_title || paperMap[pEntry.paper_id];
+                                if (pTitle && !pEntry.paper_title) {
+                                    pEntry.paper_title = pTitle;
+                                }
+                                if (Array.isArray(pEntry.sources)) {
+                                    pEntry.sources.forEach((src) => {
+                                        if (src) {
+                                            if (!src.paper_id && pEntry.paper_id) {
+                                                src.paper_id = pEntry.paper_id;
+                                            }
+                                            if (!src.paper_title && (src.paper_id && paperMap[src.paper_id])) {
+                                                src.paper_title = paperMap[src.paper_id];
+                                            } else if (!src.paper_title && pTitle) {
+                                                src.paper_title = pTitle;
+                                            }
+                                        }
+                                    });
+                                }
+                            }
+                        });
+                    }
+                });
+            }
+        }
+        return parsed;
+    }
+    return null;
+}
+
+/**
+ * Research prompt shortcuts for Cross-Paper Thematic Analysis.
+ */
+const THEMATIC_SHORTCUTS = [
+    {
+        label: 'Identify major themes',
+        prompt: 'Identify the major overarching themes and conceptual frameworks across these papers.'
+    },
+    {
+        label: 'Find recurring concepts',
+        prompt: 'Find the recurring concepts, core definitions, and shared theoretical notions across these papers.'
+    },
+    {
+        label: 'Compare common themes',
+        prompt: 'Compare how each paper addresses the common themes and shared research questions.'
+    },
+    {
+        label: 'Find differences in themes',
+        prompt: 'Identify the divergent themes, differing perspectives, and contrasting viewpoints across these papers.'
+    },
+    {
+        label: 'Identify emerging themes',
+        prompt: 'Identify emerging themes, novel techniques, and innovative directions introduced across these papers.'
+    },
+    {
+        label: 'Summarize cross-paper patterns',
+        prompt: 'Summarize key cross-paper patterns, shared methodologies, and synthesized findings across these papers.'
+    }
+];
+
+const DEFAULT_THEMATIC_QUESTION = 'Identify the major themes, recurring concepts, and important cross-paper patterns across these papers.';
+
 function ResearchWorkspace() {
     const { projectId } = useParams();
     const navigate = useNavigate();
@@ -298,6 +400,12 @@ function ResearchWorkspace() {
     const [gapQuestion, setGapQuestion] = useState('');
     const [loadingGap, setLoadingGap] = useState(false);
     const [gapError, setGapError] = useState('');
+
+    // Live Multi-Paper Thematic Analysis State
+    const [selectedThematicPaperIds, setSelectedThematicPaperIds] = useState([]);
+    const [thematicQuestion, setThematicQuestion] = useState('');
+    const [loadingThematic, setLoadingThematic] = useState(false);
+    const [thematicError, setThematicError] = useState('');
 
     // Loading & Action states
     const [loadingList, setLoadingList] = useState(true);
@@ -348,6 +456,8 @@ function ResearchWorkspace() {
             setComparisonQuestion('');
             setGapError('');
             setGapQuestion('');
+            setThematicError('');
+            setThematicQuestion('');
             setChatMode('ask');
 
             const res = await api.get(`/ai/sessions/${sessionId}/`);
@@ -364,10 +474,12 @@ function ResearchWorkspace() {
                 const compPaperIds = sessionData.papers.slice(0, 4).map((p) => p.id);
                 setSelectedComparisonPaperIds(compPaperIds);
                 setSelectedGapPaperIds(compPaperIds);
+                setSelectedThematicPaperIds(compPaperIds);
             } else {
                 setSelectedPaperId('');
                 setSelectedComparisonPaperIds([]);
                 setSelectedGapPaperIds([]);
+                setSelectedThematicPaperIds([]);
             }
         } catch (err) {
             if (currentSelectIdRef.current !== sessionId) return;
@@ -469,12 +581,15 @@ function ResearchWorkspace() {
             setSelectedPaperId('');
             setSelectedComparisonPaperIds([]);
             setSelectedGapPaperIds([]);
+            setSelectedThematicPaperIds([]);
             setQuestionText('');
             setComparisonQuestion('');
             setGapQuestion('');
+            setThematicQuestion('');
             setAskError('');
             setCompareError('');
             setGapError('');
+            setThematicError('');
             setChatMode('ask');
         } catch (err) {
             setActionError(err.response?.data?.error || 'Failed to create research session.');
@@ -628,9 +743,18 @@ function ResearchWorkspace() {
                 return validIds.slice(0, 4);
             });
 
+            // Keep thematic selection in sync with updated papers
+            setSelectedThematicPaperIds((prev) => {
+                const validIds = prev.filter((id) => selectedModalPaperIds.includes(id));
+                if (validIds.length < 2 && selectedModalPaperIds.length >= 2) {
+                    return selectedModalPaperIds.slice(0, 4);
+                }
+                return validIds.slice(0, 4);
+            });
+
             // If papers fall below 2, revert chatMode to 'ask'
             if ((updated.papers?.length || 0) < 2) {
-                if (chatMode === 'compare' || chatMode === 'gap') {
+                if (chatMode === 'compare' || chatMode === 'gap' || chatMode === 'thematic') {
                     setChatMode('ask');
                 }
             }
@@ -672,9 +796,10 @@ function ResearchWorkspace() {
 
             setSelectedComparisonPaperIds((prev) => prev.filter((id) => id !== paperIdToRemove));
             setSelectedGapPaperIds((prev) => prev.filter((id) => id !== paperIdToRemove));
+            setSelectedThematicPaperIds((prev) => prev.filter((id) => id !== paperIdToRemove));
 
             if ((updated.papers?.length || 0) < 2) {
-                if (chatMode === 'compare' || chatMode === 'gap') {
+                if (chatMode === 'compare' || chatMode === 'gap' || chatMode === 'thematic') {
                     setChatMode('ask');
                 }
             }
@@ -715,9 +840,22 @@ function ResearchWorkspace() {
         });
     };
 
+    // Toggle Paper Selection for Thematic Analysis (enforce min 2, max 4)
+    const handleToggleThematicPaper = (paperId) => {
+        setSelectedThematicPaperIds((prev) => {
+            if (prev.includes(paperId)) {
+                return prev.filter((id) => id !== paperId);
+            }
+            if (prev.length >= 4) {
+                return prev; // Maximum 4 papers strictly enforced
+            }
+            return [...prev, paperId];
+        });
+    };
+
     // Send Single-Paper Research Question via POST /api/ai/ask/
     const handleSendQuestion = async () => {
-        if (loadingAsk || loadingCompare) return;
+        if (loadingAsk || loadingCompare || loadingGap || loadingThematic) return;
         const trimmed = questionText.trim();
         if (!trimmed) return;
         if (!selectedPaperId || !activeSessionId) return;
@@ -814,7 +952,7 @@ function ResearchWorkspace() {
 
     // Send Multi-Paper Comparison via POST /api/ai/compare/
     const handleGenerateComparison = async () => {
-        if (loadingCompare || loadingAsk) return;
+        if (loadingCompare || loadingAsk || loadingGap || loadingThematic) return;
 
         if (selectedComparisonPaperIds.length < 2 || selectedComparisonPaperIds.length > 4) {
             setCompareError('Please select between 2 and 4 papers for comparison.');
@@ -904,7 +1042,7 @@ function ResearchWorkspace() {
 
     // Send Multi-Paper Research Gap Analysis via POST /api/ai/gap-analysis/
     const handleGenerateGapAnalysis = async () => {
-        if (loadingGap || loadingCompare || loadingAsk) return;
+        if (loadingGap || loadingCompare || loadingAsk || loadingThematic) return;
 
         if (selectedGapPaperIds.length < 2 || selectedGapPaperIds.length > 4) {
             setGapError('Please select between 2 and 4 papers for research gap analysis.');
@@ -1036,6 +1174,135 @@ function ResearchWorkspace() {
         }
     };
 
+    // Send Multi-Paper Thematic Analysis via POST /api/ai/thematic-analysis/
+    const handleGenerateThematicAnalysis = async () => {
+        if (loadingThematic || loadingGap || loadingCompare || loadingAsk) return;
+
+        if (selectedThematicPaperIds.length < 2 || selectedThematicPaperIds.length > 4) {
+            setThematicError('Please select between 2 and 4 papers for thematic analysis.');
+            return;
+        }
+
+        if (!activeSessionId) return;
+
+        const trimmed = thematicQuestion.trim();
+        const effectiveQuestion = trimmed || DEFAULT_THEMATIC_QUESTION;
+
+        try {
+            setLoadingThematic(true);
+            setThematicError('');
+
+            const res = await api.post('/ai/thematic-analysis/', {
+                paper_ids: selectedThematicPaperIds,
+                question: effectiveQuestion,
+                session_id: activeSessionId
+            });
+
+            // Clear input
+            setThematicQuestion('');
+
+            const thematicData = res.data.thematic_analysis || {};
+
+            // Collect all unique sources from response across all themes
+            const paperMap = {};
+            (activeSession?.papers || []).forEach((p) => {
+                paperMap[p.id] = p.title;
+            });
+
+            const allSources = [];
+            const seenKeys = new Set();
+            const themes = thematicData.themes || [];
+            if (Array.isArray(themes)) {
+                themes.forEach((th) => {
+                    if (th && Array.isArray(th.papers)) {
+                        th.papers.forEach((pEntry) => {
+                            if (pEntry && Array.isArray(pEntry.sources)) {
+                                pEntry.sources.forEach((src) => {
+                                    if (src) {
+                                        const key = src.chunk_id
+                                            ? `${src.paper_id}-${src.chunk_id}`
+                                            : `${src.paper_id}-${src.page_number}-${src.text}`;
+                                        if (!seenKeys.has(key)) {
+                                            seenKeys.add(key);
+                                            allSources.push({
+                                                id: src.chunk_id || `ev-thematic-${Date.now()}-${allSources.length}`,
+                                                paper_id: src.paper_id,
+                                                paper_title: paperMap[src.paper_id] || pEntry.paper_title || src.paper_title || 'Paper',
+                                                chunk_id: src.chunk_id,
+                                                page_number: src.page_number,
+                                                text: src.text || ''
+                                            });
+                                        }
+                                    }
+                                });
+                            }
+                        });
+                    }
+                });
+            }
+
+            const userMsg = {
+                id: `user-${Date.now()}`,
+                role: 'USER',
+                content: effectiveQuestion,
+                created_at: new Date().toISOString()
+            };
+
+            const assistantMsg = {
+                id: `assistant-${Date.now()}`,
+                role: 'ASSISTANT',
+                content: thematicData,
+                created_at: new Date().toISOString(),
+                evidence: allSources
+            };
+
+            // Auto-title session if default title
+            const isDefaultTitle = activeSession?.title === 'Research Session' || activeSession?.title === 'New Research Session';
+            const isFirstMessage = (!activeSession?.messages || activeSession.messages.length === 0);
+            let nextThematicTitle = activeSession?.title || 'Research Session';
+            if (isDefaultTitle && isFirstMessage) {
+                const autoTitle = generateAutoTitle(effectiveQuestion);
+                if (autoTitle && autoTitle !== nextThematicTitle) {
+                    nextThematicTitle = autoTitle;
+                    api.patch(`/ai/sessions/${activeSessionId}/`, { title: autoTitle }).catch((err) => {
+                        console.warn('Failed to auto-update session title:', err);
+                    });
+                }
+            }
+
+            setActiveSession((prev) => ({
+                ...prev,
+                title: nextThematicTitle,
+                messages: [...(prev?.messages || []), userMsg, assistantMsg],
+                updated_at: new Date().toISOString()
+            }));
+
+            setSessions((prev) =>
+                prev.map((s) => (s.id === activeSessionId ? { ...s, title: nextThematicTitle, updated_at: new Date().toISOString() } : s))
+            );
+
+            scrollToBottom();
+        } catch (err) {
+            if (err.response?.status === 400) {
+                setThematicError(err.response.data?.error || 'Please select between 2 and 4 papers.');
+            } else if (err.response?.status === 401) {
+                setThematicError('Authentication required.');
+            } else if (err.response?.status === 403) {
+                setThematicError('You do not have access to one or more selected papers or this session.');
+            } else if (err.response?.status === 404) {
+                setThematicError('Research session or papers not found.');
+            } else if (err.response?.status === 429) {
+                setThematicError('Gemini API rate limit exceeded. Please try again later.');
+            } else if (err.response?.status === 503) {
+                setThematicError('Gemini is temporarily unavailable. Please try again shortly.');
+            } else {
+                setThematicError(err.response?.data?.error || 'Network or server error. Please try again.');
+            }
+        } finally {
+            setLoadingThematic(false);
+        }
+    };
+
     // Keyboard shortcut for Single-Paper Ask
     const handleKeyDown = (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -1059,9 +1326,10 @@ function ResearchWorkspace() {
             );
         }
 
-        // Assistant Message: Check for structured comparison or research gap analysis JSON
+        // Assistant Message: Check for structured comparison, research gap analysis, or thematic analysis JSON
         const parsedComp = parseStructuredComparison(msg.content, activeSession?.papers || []);
         const parsedGap = !parsedComp ? parseStructuredGapAnalysis(msg.content, activeSession?.papers || []) : null;
+        const parsedThematic = (!parsedComp && !parsedGap) ? parseStructuredThematicAnalysis(msg.content, activeSession?.papers || []) : null;
 
         return (
             <div key={msg.id} className="message-row assistant">
@@ -1408,12 +1676,108 @@ function ResearchWorkspace() {
                                 </div>
                             )}
                         </div>
+                    ) : parsedThematic ? (
+                        <div className="structured-thematic-view">
+                            <span className="thematic-badge-tag">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                                </svg>
+                                Cross-Paper Thematic Analysis
+                            </span>
+
+                            {/* Overall Synthesis */}
+                            {parsedThematic.overall_synthesis && (
+                                <div className="comparison-box thematic-synthesis-box">
+                                    <h4 className="comparison-box-title" style={{ color: 'var(--accent-primary)' }}>
+                                        Overall Synthesis
+                                    </h4>
+                                    <p style={{ margin: 0, lineHeight: 1.6, color: 'var(--text-primary)' }}>
+                                        {parsedThematic.overall_synthesis}
+                                    </p>
+                                </div>
+                            )}
+
+                            {/* Themes List */}
+                            {Array.isArray(parsedThematic.themes) && parsedThematic.themes.length > 0 && (
+                                <div className="thematic-themes-list">
+                                    <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
+                                        Identified Themes ({parsedThematic.themes.length})
+                                    </h4>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                        {parsedThematic.themes.map((themeItem, tIdx) => (
+                                            <div key={tIdx} className="comparison-box thematic-theme-card">
+                                                <div className="thematic-theme-header">
+                                                    <span className="thematic-theme-number">Theme {tIdx + 1}</span>
+                                                    <h5 className="thematic-theme-title">{themeItem.theme}</h5>
+                                                </div>
+
+                                                {themeItem.description && (
+                                                    <p className="thematic-theme-desc">{themeItem.description}</p>
+                                                )}
+
+                                                {/* Papers discussing the theme */}
+                                                {Array.isArray(themeItem.papers) && themeItem.papers.length > 0 && (
+                                                    <div className="thematic-papers-section">
+                                                        <h6 className="thematic-subheading">Papers Discussing this Theme</h6>
+                                                        <div className="thematic-papers-list">
+                                                            {themeItem.papers.map((paperEntry, pIdx) => (
+                                                                <div key={pIdx} className="thematic-paper-entry">
+                                                                    <div className="thematic-paper-entry-header">
+                                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                                                            <polyline points="14 2 14 8 20 8"></polyline>
+                                                                        </svg>
+                                                                        <span className="thematic-paper-entry-title">
+                                                                            {paperEntry.paper_title || `Paper #${paperEntry.paper_id}`}
+                                                                        </span>
+                                                                    </div>
+                                                                    {paperEntry.discussion && (
+                                                                        <p className="thematic-paper-discussion">
+                                                                            {paperEntry.discussion}
+                                                                        </p>
+                                                                    )}
+                                                                    {/* Evidence sources for this paper discussion */}
+                                                                    {Array.isArray(paperEntry.sources) && paperEntry.sources.length > 0 && (
+                                                                        <div style={{ marginTop: '0.4rem' }}>
+                                                                            {paperEntry.sources.map((src, sIdx) => (
+                                                                                <EvidenceSource key={sIdx} source={src} projectId={projectId} />
+                                                                            ))}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {/* Cross-paper observation */}
+                                                {themeItem.cross_paper_observation && (
+                                                    <div className="thematic-observation-box">
+                                                        <div className="thematic-observation-label">
+                                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                                <circle cx="12" cy="12" r="10"></circle>
+                                                                <line x1="12" y1="16" x2="12" y2="12"></line>
+                                                                <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                                                            </svg>
+                                                            Cross-Paper Observation
+                                                        </div>
+                                                        <p className="thematic-observation-text">
+                                                            {themeItem.cross_paper_observation}
+                                                        </p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     ) : (
                         <p className="message-text">{msg.content}</p>
                     )}
 
                     {/* Saved Grounded Evidence Sources (Single-Paper Ask) */}
-                    {Array.isArray(msg.evidence) && msg.evidence.length > 0 && !parsedComp && !parsedGap && (
+                    {Array.isArray(msg.evidence) && msg.evidence.length > 0 && !parsedComp && !parsedGap && !parsedThematic && (
                         <div className="message-evidence-container">
                             <div className="evidence-header-label">
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -1857,6 +2221,13 @@ function ResearchWorkspace() {
                                     </div>
                                 )}
 
+                                {loadingThematic && (
+                                    <div className="ai-analyzing-banner thematic-banner">
+                                        <span className="spinner-icon-sm"></span>
+                                        <span>NForge AI is analyzing themes across papers...</span>
+                                    </div>
+                                )}
+
                                 <div ref={messagesEndRef} />
                             </div>
 
@@ -1870,7 +2241,7 @@ function ResearchWorkspace() {
                                                 type="button"
                                                 className={`chat-mode-tab ${chatMode === 'ask' ? 'active' : ''}`}
                                                 onClick={() => setChatMode('ask')}
-                                                disabled={loadingAsk || loadingCompare || loadingGap}
+                                                disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic}
                                             >
                                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                                     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
@@ -1881,7 +2252,7 @@ function ResearchWorkspace() {
                                                 type="button"
                                                 className={`chat-mode-tab ${chatMode === 'compare' ? 'active' : ''}`}
                                                 onClick={() => setChatMode('compare')}
-                                                disabled={loadingAsk || loadingCompare || loadingGap || !hasAtLeastTwoPapers}
+                                                disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic || !hasAtLeastTwoPapers}
                                                 title={!hasAtLeastTwoPapers ? 'Add at least 2 papers to compare' : 'Compare 2 to 4 papers'}
                                             >
                                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1902,7 +2273,7 @@ function ResearchWorkspace() {
                                                 type="button"
                                                 className={`chat-mode-tab ${chatMode === 'gap' ? 'active' : ''}`}
                                                 onClick={() => setChatMode('gap')}
-                                                disabled={loadingAsk || loadingCompare || loadingGap || !hasAtLeastTwoPapers}
+                                                disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic || !hasAtLeastTwoPapers}
                                                 title={!hasAtLeastTwoPapers ? 'Add at least 2 papers to analyze gaps' : 'Identify research gaps across 2 to 4 papers'}
                                             >
                                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1911,6 +2282,23 @@ function ResearchWorkspace() {
                                                     <line x1="12" y1="16" x2="12.01" y2="16"></line>
                                                 </svg>
                                                 Research Gaps
+                                                {!hasAtLeastTwoPapers ? (
+                                                    <span className="mode-tab-badge disabled">Requires 2+ papers</span>
+                                                ) : (
+                                                    <span className="mode-tab-badge">2–4</span>
+                                                )}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                className={`chat-mode-tab ${chatMode === 'thematic' ? 'active' : ''}`}
+                                                onClick={() => setChatMode('thematic')}
+                                                disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic || !hasAtLeastTwoPapers}
+                                                title={!hasAtLeastTwoPapers ? 'Add at least 2 papers to analyze themes' : 'Identify cross-paper themes across 2 to 4 papers'}
+                                            >
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                                                </svg>
+                                                Thematic Analysis
                                                 {!hasAtLeastTwoPapers ? (
                                                     <span className="mode-tab-badge disabled">Requires 2+ papers</span>
                                                 ) : (
@@ -1931,7 +2319,7 @@ function ResearchWorkspace() {
                                                         className="chat-paper-select"
                                                         value={selectedPaperId}
                                                         onChange={(e) => setSelectedPaperId(e.target.value)}
-                                                        disabled={loadingAsk || loadingCompare || loadingGap}
+                                                        disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic}
                                                     >
                                                         {activeSession.papers.map((p) => (
                                                             <option key={p.id} value={p.id}>
@@ -1954,7 +2342,7 @@ function ResearchWorkspace() {
                                                             key={idx}
                                                             type="button"
                                                             className="prompt-shortcut-btn"
-                                                            disabled={loadingAsk || loadingCompare || loadingGap}
+                                                            disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic}
                                                             onClick={() => setQuestionText(item.prompt)}
                                                             title={item.prompt}
                                                             aria-label={`Fill prompt: ${item.label}`}
@@ -1977,13 +2365,13 @@ function ResearchWorkspace() {
                                                         value={questionText}
                                                         onChange={(e) => setQuestionText(e.target.value)}
                                                         onKeyDown={handleKeyDown}
-                                                        disabled={loadingAsk || loadingCompare || loadingGap}
+                                                        disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic}
                                                         rows={2}
                                                     />
                                                     <button
                                                         className="chat-send-btn"
                                                         onClick={handleSendQuestion}
-                                                        disabled={loadingAsk || loadingCompare || loadingGap || !questionText.trim() || !selectedPaperId}
+                                                        disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic || !questionText.trim() || !selectedPaperId}
                                                         title="Send question (Enter)"
                                                         type="button"
                                                     >
@@ -2030,7 +2418,7 @@ function ResearchWorkspace() {
                                                                     <input
                                                                         type="checkbox"
                                                                         checked={isSelected}
-                                                                        disabled={loadingCompare || loadingGap || isMaxReached}
+                                                                        disabled={loadingThematic || loadingCompare || loadingGap || loadingAsk || isMaxReached}
                                                                         onChange={() => handleToggleComparisonPaper(p.id)}
                                                                     />
                                                                     <span className="compare-paper-pill-title">{p.title}</span>
@@ -2057,7 +2445,7 @@ function ResearchWorkspace() {
                                                             key={idx}
                                                             type="button"
                                                             className="prompt-shortcut-btn"
-                                                            disabled={loadingCompare || loadingAsk || loadingGap}
+                                                            disabled={loadingThematic || loadingCompare || loadingAsk || loadingGap}
                                                             onClick={() => setComparisonQuestion(item.prompt)}
                                                             title={item.prompt}
                                                             aria-label={`Fill prompt: ${item.label}`}
@@ -2079,13 +2467,13 @@ function ResearchWorkspace() {
                                                         placeholder="What would you like to compare? e.g. methodology, findings, limitations, and research gaps"
                                                         value={comparisonQuestion}
                                                         onChange={(e) => setComparisonQuestion(e.target.value)}
-                                                        disabled={loadingCompare || loadingGap}
+                                                        disabled={loadingThematic || loadingCompare || loadingGap || loadingAsk}
                                                         rows={2}
                                                     />
                                                     <button
                                                         className="chat-send-btn compare-btn"
                                                         onClick={handleGenerateComparison}
-                                                        disabled={loadingCompare || loadingGap || loadingAsk || selectedComparisonPaperIds.length < 2 || selectedComparisonPaperIds.length > 4}
+                                                        disabled={loadingThematic || loadingCompare || loadingGap || loadingAsk || selectedComparisonPaperIds.length < 2 || selectedComparisonPaperIds.length > 4}
                                                         title="Generate cross-paper comparison"
                                                         type="button"
                                                     >
@@ -2135,7 +2523,7 @@ function ResearchWorkspace() {
                                                                     <input
                                                                         type="checkbox"
                                                                         checked={isSelected}
-                                                                        disabled={loadingGap || loadingCompare || isMaxReached}
+                                                                        disabled={loadingThematic || loadingGap || loadingCompare || loadingAsk || isMaxReached}
                                                                         onChange={() => handleToggleGapPaper(p.id)}
                                                                     />
                                                                     <span className="compare-paper-pill-title">{p.title}</span>
@@ -2160,7 +2548,7 @@ function ResearchWorkspace() {
                                                             key={idx}
                                                             type="button"
                                                             className="prompt-shortcut-btn"
-                                                            disabled={loadingGap || loadingCompare || loadingAsk}
+                                                            disabled={loadingThematic || loadingGap || loadingCompare || loadingAsk}
                                                             onClick={() => setGapQuestion(item.prompt)}
                                                             title={item.prompt}
                                                             aria-label={`Fill prompt: ${item.label}`}
@@ -2182,13 +2570,13 @@ function ResearchWorkspace() {
                                                         placeholder="Identify the major research gaps, limitations, unanswered questions, and future research directions across these papers..."
                                                         value={gapQuestion}
                                                         onChange={(e) => setGapQuestion(e.target.value)}
-                                                        disabled={loadingGap || loadingCompare}
+                                                        disabled={loadingThematic || loadingGap || loadingCompare || loadingAsk}
                                                         rows={2}
                                                     />
                                                     <button
                                                         className="chat-send-btn gap-btn"
                                                         onClick={handleGenerateGapAnalysis}
-                                                        disabled={loadingGap || loadingCompare || loadingAsk || selectedGapPaperIds.length < 2 || selectedGapPaperIds.length > 4}
+                                                        disabled={loadingThematic || loadingGap || loadingCompare || loadingAsk || selectedGapPaperIds.length < 2 || selectedGapPaperIds.length > 4}
                                                         title="Generate research gap analysis"
                                                         type="button"
                                                     >
@@ -2202,6 +2590,103 @@ function ResearchWorkspace() {
                                                             </svg>
                                                         )}
                                                         <span>Generate Research Gap Analysis</span>
+                                                    </button>
+                                                </div>
+                                            </>
+                                        )}
+
+                                        {/* MODE 4: Multi-Paper Thematic Analysis */}
+                                        {chatMode === 'thematic' && (
+                                            <>
+                                                {/* Select 2-4 Papers for Thematic Analysis */}
+                                                <div className="compare-selection-bar">
+                                                    <div className="compare-selection-header">
+                                                        <span className="compare-selection-title">
+                                                            Select 2 to 4 papers to analyze themes:
+                                                        </span>
+                                                        <span className={`compare-selection-count ${selectedThematicPaperIds.length < 2 ? 'warn' : 'valid'}`}>
+                                                            {selectedThematicPaperIds.length}/4 selected
+                                                            {selectedThematicPaperIds.length < 2 && ' (minimum 2)'}
+                                                        </span>
+                                                    </div>
+
+                                                    <div className="compare-papers-grid">
+                                                        {activeSession.papers.map((p) => {
+                                                            const isSelected = selectedThematicPaperIds.includes(p.id);
+                                                            const isMaxReached = selectedThematicPaperIds.length >= 4 && !isSelected;
+
+                                                            return (
+                                                                <label
+                                                                    key={p.id}
+                                                                    className={`compare-paper-pill ${isSelected ? 'selected' : ''} ${isMaxReached ? 'disabled' : ''}`}
+                                                                    title={isMaxReached ? 'Maximum 4 papers reached (deselect one first)' : p.title}
+                                                                >
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={isSelected}
+                                                                        disabled={loadingThematic || loadingGap || loadingCompare || loadingAsk || isMaxReached}
+                                                                        onChange={() => handleToggleThematicPaper(p.id)}
+                                                                    />
+                                                                    <span className="compare-paper-pill-title">{p.title}</span>
+                                                                </label>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+
+                                                {/* Research Prompt Shortcuts for Thematic Analysis */}
+                                                <div className="prompt-shortcuts-row">
+                                                    <span className="prompt-shortcuts-label">
+                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ opacity: 0.75 }}>
+                                                            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                                                        </svg>
+                                                        Thematic prompts:
+                                                    </span>
+                                                    {THEMATIC_SHORTCUTS.map((item, idx) => (
+                                                        <button
+                                                            key={idx}
+                                                            type="button"
+                                                            className="prompt-shortcut-btn"
+                                                            disabled={loadingThematic || loadingGap || loadingCompare || loadingAsk}
+                                                            onClick={() => setThematicQuestion(item.prompt)}
+                                                            title={item.prompt}
+                                                            aria-label={`Fill prompt: ${item.label}`}
+                                                        >
+                                                            {item.label}
+                                                        </button>
+                                                    ))}
+                                                </div>
+
+                                                {thematicError && (
+                                                    <div className="alert-box error" style={{ marginBottom: '0.75rem' }}>
+                                                        {thematicError}
+                                                    </div>
+                                                )}
+
+                                                <div className="chat-input-row">
+                                                    <textarea
+                                                        className="chat-textarea"
+                                                        placeholder="Identify the major themes, recurring concepts, and important cross-paper patterns across these papers..."
+                                                        value={thematicQuestion}
+                                                        onChange={(e) => setThematicQuestion(e.target.value)}
+                                                        disabled={loadingThematic || loadingGap || loadingCompare || loadingAsk}
+                                                        rows={2}
+                                                    />
+                                                    <button
+                                                        className="chat-send-btn thematic-btn"
+                                                        onClick={handleGenerateThematicAnalysis}
+                                                        disabled={loadingThematic || loadingGap || loadingCompare || loadingAsk || selectedThematicPaperIds.length < 2 || selectedThematicPaperIds.length > 4}
+                                                        title="Generate cross-paper thematic analysis"
+                                                        type="button"
+                                                    >
+                                                        {loadingThematic ? (
+                                                            <span className="spinner-icon-sm"></span>
+                                                        ) : (
+                                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                                                            </svg>
+                                                        )}
+                                                        <span>Generate Thematic Analysis</span>
                                                     </button>
                                                 </div>
                                             </>

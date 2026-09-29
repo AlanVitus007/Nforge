@@ -1702,4 +1702,411 @@ Source Excerpts:
         **thematic_data,
     }
 
+
+def parse_research_trend_analysis_json(text):
+    """
+    Parse JSON from Gemini research trend analysis response text.
+    Handles Markdown code fences (```json) safely and normalizes
+    missing or malformed categories into safe defaults and lists.
+    """
+    cleaned = text.strip() if text else ""
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned)
+        cleaned = re.sub(r'\s*```$', '', cleaned)
+
+    try:
+        data = json.loads(cleaned)
+    except Exception as err:
+        print(f"Failed to parse research trend analysis JSON: {err}")
+        data = {}
+
+    if not isinstance(data, dict):
+        data = {}
+
+    # 1. research_evolution
+    raw_evolution = data.get("research_evolution")
+    if not isinstance(raw_evolution, list):
+        raw_evolution = []
+
+    normalized_evolution = []
+    for item in raw_evolution:
+        if not isinstance(item, dict):
+            continue
+
+        raw_papers = item.get("papers")
+        if not isinstance(raw_papers, list):
+            raw_papers = []
+
+        normalized_papers = []
+        for p_item in raw_papers:
+            if not isinstance(p_item, dict):
+                continue
+            raw_sources = p_item.get("sources")
+            if not isinstance(raw_sources, list):
+                raw_sources = p_item.get("source_refs") if isinstance(p_item.get("source_refs"), list) else []
+
+            normalized_papers.append({
+                "paper_id": p_item.get("paper_id"),
+                "paper_title": p_item.get("paper_title") or "",
+                "observation": p_item.get("observation") or p_item.get("discussion") or "",
+                "sources": raw_sources,
+            })
+
+        normalized_evolution.append({
+            "trend": item.get("trend") or "Research Evolution Trend",
+            "description": item.get("description") or "No detailed description provided.",
+            "papers": normalized_papers,
+            "evolution_observation": item.get("evolution_observation") or item.get("cross_paper_observation") or "",
+        })
+
+    # 2. emerging_directions
+    raw_emerging = data.get("emerging_directions")
+    if not isinstance(raw_emerging, list):
+        raw_emerging = []
+
+    normalized_emerging = []
+    for item in raw_emerging:
+        if not isinstance(item, dict):
+            continue
+        raw_sources = item.get("sources")
+        if not isinstance(raw_sources, list):
+            raw_sources = item.get("source_refs") if isinstance(item.get("source_refs"), list) else []
+
+        normalized_emerging.append({
+            "direction": item.get("direction") or item.get("statement") or "Emerging Direction",
+            "description": item.get("description") or "",
+            "sources": raw_sources,
+        })
+
+    # 3. methodology_evolution
+    raw_methodology = data.get("methodology_evolution")
+    if not isinstance(raw_methodology, list):
+        raw_methodology = []
+
+    normalized_methodology = []
+    for item in raw_methodology:
+        if not isinstance(item, dict):
+            continue
+        raw_sources = item.get("sources")
+        if not isinstance(raw_sources, list):
+            raw_sources = item.get("source_refs") if isinstance(item.get("source_refs"), list) else []
+
+        normalized_methodology.append({
+            "aspect": item.get("aspect") or item.get("methodology") or item.get("name") or "Methodological Shift",
+            "description": item.get("description") or item.get("statement") or "",
+            "sources": raw_sources,
+        })
+
+    # 4. future_directions
+    raw_future = data.get("future_directions")
+    if not isinstance(raw_future, list):
+        raw_future = []
+
+    normalized_future = []
+    for item in raw_future:
+        if not isinstance(item, dict):
+            continue
+        raw_sources = item.get("sources")
+        if not isinstance(raw_sources, list):
+            raw_sources = item.get("source_refs") if isinstance(item.get("source_refs"), list) else []
+
+        normalized_future.append({
+            "direction": item.get("direction") or item.get("statement") or "Future Direction",
+            "description": item.get("description") or "",
+            "sources": raw_sources,
+        })
+
+    return {
+        "overall_trend": data.get("overall_trend") or "Research trend analysis unavailable based on the provided evidence.",
+        "research_evolution": normalized_evolution,
+        "emerging_directions": normalized_emerging,
+        "methodology_evolution": normalized_methodology,
+        "future_directions": normalized_future,
+    }
+
+
+def generate_research_trend_analysis(question, papers):
+    """
+    Perform single-call Gemini cross-paper Research Trend Analysis.
+
+    1. Validates paper count (2 to 4 unique Paper instances required).
+    2. Calls local retrieve_multi_paper_evidence() to retrieve top evidence chunks.
+    3. Builds a bounded prompt context with strict grounding rules and publication date awareness.
+    4. Makes EXACTLY ONE Gemini API call.
+    5. Validates and resolves returned sources against actual DB PaperChunk instances.
+    6. Returns structured research trend analysis JSON conforming to Phase 7.3 schema.
+    """
+    from papers.models import Paper
+
+    if not papers:
+        raise ValueError("papers must be a non-empty list of Paper instances.")
+
+    papers_list = list(papers)
+
+    for p in papers_list:
+        if not isinstance(p, Paper):
+            raise ValueError("Each item in papers must be a valid Paper instance.")
+
+    paper_ids = [p.id for p in papers_list]
+    if len(set(paper_ids)) != len(paper_ids):
+        raise ValueError("Research trend analysis requires unique Paper instances.")
+
+    if len(papers_list) < 2 or len(papers_list) > 4:
+        raise ValueError("Research trend analysis requires between 2 and 4 papers.")
+
+    paper_by_id = {p.id: p for p in papers_list}
+
+    # Format papers metadata
+    papers_info = []
+    for p in papers_list:
+        p_info = {"paper_id": p.id, "title": p.title}
+        pub_year = getattr(p, "publication_year", None) or getattr(p, "year", None)
+        if pub_year is not None:
+            p_info["publication_year"] = pub_year
+        papers_info.append(p_info)
+
+    # Formulate query text (0 Gemini calls)
+    query_text = (
+        question.strip()
+        if (question and isinstance(question, str) and question.strip())
+        else "research trends evolution methodologies shifts emerging paradigms future directions"
+    )
+
+    # 1. Retrieve local evidence chunks across 2-4 papers (0 Gemini calls)
+    retrieved_groups = retrieve_multi_paper_evidence(
+        question=query_text,
+        papers=papers_list,
+        top_k_per_paper=5,
+    )
+
+    # Check for empty evidence across all papers
+    total_chunks = sum(len(group["sources"]) for group in retrieved_groups)
+    if total_chunks == 0:
+        empty_trend_data = {
+            "overall_trend": "Insufficient text content found across the selected papers to analyze research trends.",
+            "research_evolution": [],
+            "emerging_directions": [],
+            "methodology_evolution": [],
+            "future_directions": [],
+        }
+        return {
+            "question": query_text,
+            "papers": papers_info,
+            "trend_analysis": empty_trend_data,
+            **empty_trend_data,
+        }
+
+    # Fetch DB PaperChunk objects to resolve and verify source_refs against real DB records
+    chunk_ids = [
+        source["chunk_id"]
+        for group in retrieved_groups
+        for source in group["sources"]
+    ]
+    db_chunks = PaperChunk.objects.filter(id__in=chunk_ids).select_related("paper")
+    valid_chunk_map = {chunk.id: chunk for chunk in db_chunks}
+
+    # Build prompt context with exact paper and chunk references
+    context_blocks = []
+    for group in retrieved_groups:
+        pid = group["paper_id"]
+        paper_obj = paper_by_id.get(pid)
+        pub_year = getattr(paper_obj, "publication_year", None) or getattr(paper_obj, "year", None) if paper_obj else None
+        year_str = f" (Publication Year: {pub_year})" if pub_year else ""
+        paper_block = [f"PAPER ID: {group['paper_id']}\nTitle: {group['paper_title']}{year_str}"]
+        for s in group["sources"]:
+            page_str = f"Page: {s['page_number']}" if s.get("page_number") else "Page: 1"
+            paper_block.append(f"SOURCE (Chunk ID: {s['chunk_id']}, {page_str}):\n{s['text']}")
+        context_blocks.append("\n\n".join(paper_block))
+
+    combined_context = "\n\n---\n\n".join(context_blocks)
+    paper_titles_str = ", ".join([
+        f"'{p.title}' (ID: {p.id}" + (f", Year: {getattr(p, 'publication_year', None) or getattr(p, 'year', None)}" if (getattr(p, 'publication_year', None) or getattr(p, 'year', None)) else "") + ")"
+        for p in papers_list
+    ])
+
+    prompt = f"""You are an expert academic research assistant specializing in analyzing research evolution, methodological trends, and future directions across scientific literature.
+
+Analyze the following research papers: {paper_titles_str}
+
+Trend Analysis Focus / Query: {query_text}
+
+Use ONLY the provided paper source excerpts to identify genuine research evolution, methodological shifts, and emerging patterns.
+
+Guidelines:
+- "overall_trend": Comprehensive high-level synthesis of how research focus, paradigms, or techniques evolve across the analyzed papers.
+- "research_evolution": Array of key research evolution patterns or shifts. For each trend:
+  - "trend": Concise, descriptive title for the evolutionary trend or shift.
+  - "description": Explanation of how this trend manifests across the literature.
+  - "papers": Array of participating papers. Each entry MUST include:
+    - "paper_id": Exact paper ID from the excerpts.
+    - "paper_title": Title of the paper.
+    - "observation": Specific observation of how this paper reflects or contributes to the trend.
+    - "sources": Array of referenced evidence sources with exact {{"paper_id": ..., "chunk_id": ...}} from the excerpts.
+  - "evolution_observation": Cross-paper comparative observation summarizing the trajectory or contrast across papers.
+- "emerging_directions": Array of emerging topics, novel paradigms, or newly explored questions supported by the excerpts:
+  - "direction": Title/name of the emerging direction.
+  - "description": Concrete description of the direction supported by the papers.
+  - "sources": Array of referenced evidence sources with exact {{"paper_id": ..., "chunk_id": ...}} from the excerpts.
+- "methodology_evolution": Array of methodological shifts, changes in techniques/models, or evolving experimental designs:
+  - "aspect": Aspect or dimension of methodology (e.g. model architecture, evaluation protocol, dataset scaling).
+  - "description": How methodologies differ or evolve across the papers.
+  - "sources": Array of referenced evidence sources with exact {{"paper_id": ..., "chunk_id": ...}} from the excerpts.
+- "future_directions": Array of promising future research directions explicitly articulated or supported by the papers:
+  - "direction": Concrete future direction.
+  - "description": Detailed description grounded in paper findings or limitations.
+  - "sources": Array of referenced evidence sources with exact {{"paper_id": ..., "chunk_id": ...}} from the excerpts.
+
+Chronological Ordering & Dates:
+- Do NOT invent or assume publication years or dates unless explicitly specified in the paper headers above or verified in the excerpt text.
+- If publication years or dates are NOT provided, describe research evolution as progression/variation "across the selected papers" rather than claiming an unsupported chronological timeline (e.g. avoid unsupported claims like "in 2021... followed by 2023").
+
+Grounding Rules:
+- Base every single claim strictly on the supplied evidence excerpts.
+- Do NOT use outside knowledge, speculate without evidence, or invent unsupported claims.
+- Do NOT invent paper titles, paper IDs, chunk IDs, or page numbers.
+- For every observation, include "sources" referencing exact "paper_id" and "chunk_id" from the excerpts.
+- Output MUST be STRICT JSON matching the schema below.
+
+Return your response STRICTLY as a JSON object matching this schema:
+{{
+    "overall_trend": "Comprehensive high-level synthesis of research trends across the analyzed papers",
+    "research_evolution": [
+        {{
+            "trend": "Trend Name",
+            "description": "Explanation of how research evolved across the papers",
+            "papers": [
+                {{
+                    "paper_id": 1,
+                    "paper_title": "Paper Title",
+                    "observation": "Observation for this paper",
+                    "sources": [
+                        {{"paper_id": 1, "chunk_id": 101}}
+                    ]
+                }}
+            ],
+            "evolution_observation": "Cross-paper observation on the evolutionary trajectory"
+        }}
+    ],
+    "emerging_directions": [
+        {{
+            "direction": "Emerging Direction Title",
+            "description": "Description of emerging direction",
+            "sources": [
+                {{"paper_id": 1, "chunk_id": 101}}
+            ]
+        }}
+    ],
+    "methodology_evolution": [
+        {{
+            "aspect": "Methodology Aspect",
+            "description": "Evolution or comparison of methodology",
+            "sources": [
+                {{"paper_id": 1, "chunk_id": 101}}
+            ]
+        }}
+    ],
+    "future_directions": [
+        {{
+            "direction": "Future Research Direction",
+            "description": "Description of future direction",
+            "sources": [
+                {{"paper_id": 1, "chunk_id": 101}}
+            ]
+        }}
+    ]
+}}
+
+Source Excerpts:
+{combined_context}
+"""
+
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY is not configured.")
+
+    client = genai.Client(api_key=api_key)
+
+    # Single Gemini call limit (EXACTLY 1 request)
+    gemini_call_count = 1
+    print(f"[Research Trend Analysis] Making Gemini call #{gemini_call_count} (EXACTLY 1 request)")
+    response = _call_gemini(client, prompt, json_mode=True, feature_name="research_trend_analysis")
+
+    raw_parsed = parse_research_trend_analysis_json(response.text)
+
+    # 1. Validate research_evolution
+    validated_evolution = []
+    for ev_item in raw_parsed["research_evolution"]:
+        validated_papers = []
+        for p_item in ev_item["papers"]:
+            raw_sources = p_item.get("sources") or []
+            resolved_sources = validate_and_resolve_source_refs(raw_sources, valid_chunk_map)
+
+            pid = p_item.get("paper_id")
+            paper_obj = paper_by_id.get(pid)
+            p_title = p_item.get("paper_title") or (paper_obj.title if paper_obj else "")
+
+            validated_papers.append({
+                "paper_id": pid,
+                "paper_title": p_title,
+                "observation": p_item.get("observation") or "",
+                "sources": resolved_sources,
+            })
+
+        validated_evolution.append({
+            "trend": ev_item["trend"],
+            "description": ev_item["description"],
+            "papers": validated_papers,
+            "evolution_observation": ev_item.get("evolution_observation") or "",
+        })
+
+    # 2. Validate emerging_directions
+    validated_emerging = []
+    for em_item in raw_parsed["emerging_directions"]:
+        raw_sources = em_item.get("sources") or []
+        resolved_sources = validate_and_resolve_source_refs(raw_sources, valid_chunk_map)
+        validated_emerging.append({
+            "direction": em_item["direction"],
+            "description": em_item["description"],
+            "sources": resolved_sources,
+        })
+
+    # 3. Validate methodology_evolution
+    validated_methodology = []
+    for meth_item in raw_parsed["methodology_evolution"]:
+        raw_sources = meth_item.get("sources") or []
+        resolved_sources = validate_and_resolve_source_refs(raw_sources, valid_chunk_map)
+        validated_methodology.append({
+            "aspect": meth_item["aspect"],
+            "description": meth_item["description"],
+            "sources": resolved_sources,
+        })
+
+    # 4. Validate future_directions
+    validated_future = []
+    for fut_item in raw_parsed["future_directions"]:
+        raw_sources = fut_item.get("sources") or []
+        resolved_sources = validate_and_resolve_source_refs(raw_sources, valid_chunk_map)
+        validated_future.append({
+            "direction": fut_item["direction"],
+            "description": fut_item["description"],
+            "sources": resolved_sources,
+        })
+
+    print(f"[DIAGNOSTICS] Feature: research_trend_analysis | Gemini Calls: {gemini_call_count}")
+
+    trend_data = {
+        "overall_trend": raw_parsed["overall_trend"],
+        "research_evolution": validated_evolution,
+        "emerging_directions": validated_emerging,
+        "methodology_evolution": validated_methodology,
+        "future_directions": validated_future,
+    }
+
+    return {
+        "question": query_text,
+        "papers": papers_info,
+        "trend_analysis": trend_data,
+        **trend_data,
+    }
+
 
