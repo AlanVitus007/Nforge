@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework import status
 
 from projects.models import Project
+from projects.permissions import can_view_project, can_write_research
 from papers.models import Paper
 from .models import PaperChunk, ResearchSession, ResearchMessage, ResearchEvidence
 from .serializers import (
@@ -90,6 +91,12 @@ def ask_ai(request):
                 "code": "NOT_FOUND"
             }, status=status.HTTP_404_NOT_FOUND)
 
+        if not can_view_project(request.user, paper.project) or not can_write_research(request.user, paper.project):
+            return Response({
+                "error": "Access denied.",
+                "code": "FORBIDDEN"
+            }, status=status.HTTP_403_FORBIDDEN)
+
         session = None
         if session_id is not None:
             try:
@@ -100,7 +107,7 @@ def ask_ai(request):
                     "code": "NOT_FOUND"
                 }, status=status.HTTP_404_NOT_FOUND)
 
-            if session.project.owner != request.user:
+            if not can_view_project(request.user, session.project) or not can_write_research(request.user, session.project):
                 return Response({
                     "error": "Access denied.",
                     "code": "FORBIDDEN"
@@ -168,12 +175,24 @@ def generate_summary_view(request):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            paper = Paper.objects.get(id=paper_id, project__owner=request.user)
+            paper = Paper.objects.get(id=paper_id)
         except Paper.DoesNotExist:
             return Response({
                 "error": "Paper not found or access denied.",
                 "code": "NOT_FOUND"
             }, status=status.HTTP_404_NOT_FOUND)
+
+        if not can_view_project(request.user, paper.project):
+            return Response({
+                "error": "Paper not found or access denied.",
+                "code": "NOT_FOUND"
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        if not can_write_research(request.user, paper.project):
+            return Response({
+                "error": "Access denied.",
+                "code": "FORBIDDEN"
+            }, status=status.HTTP_403_FORBIDDEN)
 
         summary_response = generate_paper_summary(paper)
         return Response(summary_response, status=status.HTTP_200_OK)
@@ -195,12 +214,24 @@ def generate_research_gaps_view(request):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            paper = Paper.objects.get(id=paper_id, project__owner=request.user)
+            paper = Paper.objects.get(id=paper_id)
         except Paper.DoesNotExist:
             return Response({
                 "error": "Paper not found or access denied.",
                 "code": "NOT_FOUND"
             }, status=status.HTTP_404_NOT_FOUND)
+
+        if not can_view_project(request.user, paper.project):
+            return Response({
+                "error": "Paper not found or access denied.",
+                "code": "NOT_FOUND"
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        if not can_write_research(request.user, paper.project):
+            return Response({
+                "error": "Access denied.",
+                "code": "FORBIDDEN"
+            }, status=status.HTTP_403_FORBIDDEN)
 
         gaps_response = generate_research_gaps(paper)
         return Response(gaps_response, status=status.HTTP_200_OK)
@@ -256,7 +287,7 @@ def compare_papers_view(request):
                     "code": "NOT_FOUND"
                 }, status=status.HTTP_404_NOT_FOUND)
 
-            if paper.project.owner != request.user:
+            if not can_view_project(request.user, paper.project) or not can_write_research(request.user, paper.project):
                 return Response({
                     "error": "Access denied for one or more requested papers.",
                     "code": "FORBIDDEN"
@@ -275,7 +306,7 @@ def compare_papers_view(request):
                     "code": "NOT_FOUND"
                 }, status=status.HTTP_404_NOT_FOUND)
 
-            if session.project.owner != request.user:
+            if not can_view_project(request.user, session.project) or not can_write_research(request.user, session.project):
                 return Response({
                     "error": "Access denied.",
                     "code": "FORBIDDEN"
@@ -430,7 +461,7 @@ def research_gap_analysis_view(request):
                     "code": "NOT_FOUND"
                 }, status=status.HTTP_404_NOT_FOUND)
 
-            if paper.project.owner != request.user:
+            if not can_view_project(request.user, paper.project) or not can_write_research(request.user, paper.project):
                 return Response({
                     "error": "Access denied for one or more requested papers.",
                     "code": "FORBIDDEN"
@@ -449,7 +480,7 @@ def research_gap_analysis_view(request):
                     "code": "NOT_FOUND"
                 }, status=status.HTTP_404_NOT_FOUND)
 
-            if session.project.owner != request.user:
+            if not can_view_project(request.user, session.project) or not can_write_research(request.user, session.project):
                 return Response({
                     "error": "Access denied.",
                     "code": "FORBIDDEN"
@@ -611,7 +642,7 @@ def thematic_analysis_view(request):
                     "code": "NOT_FOUND"
                 }, status=status.HTTP_404_NOT_FOUND)
 
-            if paper.project.owner != request.user:
+            if not can_view_project(request.user, paper.project) or not can_write_research(request.user, paper.project):
                 return Response({
                     "error": "Access denied for one or more requested papers.",
                     "code": "FORBIDDEN"
@@ -630,7 +661,7 @@ def thematic_analysis_view(request):
                     "code": "NOT_FOUND"
                 }, status=status.HTTP_404_NOT_FOUND)
 
-            if session.project.owner != request.user:
+            if not can_view_project(request.user, session.project) or not can_write_research(request.user, session.project):
                 return Response({
                     "error": "Access denied.",
                     "code": "FORBIDDEN"
@@ -786,7 +817,7 @@ def research_trends_view(request):
                     "code": "NOT_FOUND"
                 }, status=status.HTTP_404_NOT_FOUND)
 
-            if paper.project.owner != request.user:
+            if not can_view_project(request.user, paper.project) or not can_write_research(request.user, paper.project):
                 return Response({
                     "error": "Access denied for one or more requested papers.",
                     "code": "FORBIDDEN"
@@ -805,7 +836,7 @@ def research_trends_view(request):
                     "code": "NOT_FOUND"
                 }, status=status.HTTP_404_NOT_FOUND)
 
-            if session.project.owner != request.user:
+            if not can_view_project(request.user, session.project) or not can_write_research(request.user, session.project):
                 return Response({
                     "error": "Access denied.",
                     "code": "FORBIDDEN"
@@ -947,7 +978,7 @@ def session_list_create_view(request):
                     "code": "NOT_FOUND"
                 }, status=status.HTTP_404_NOT_FOUND)
 
-            if project.owner != request.user:
+            if not can_view_project(request.user, project) or not can_write_research(request.user, project):
                 return Response({
                     "error": "Access denied.",
                     "code": "FORBIDDEN"
@@ -983,7 +1014,7 @@ def session_list_create_view(request):
                     "code": "NOT_FOUND"
                 }, status=status.HTTP_404_NOT_FOUND)
 
-            if project.owner != request.user:
+            if not can_view_project(request.user, project):
                 return Response({
                     "error": "Access denied.",
                     "code": "FORBIDDEN"
@@ -1013,7 +1044,7 @@ def session_detail_view(request, session_id):
                 "code": "NOT_FOUND"
             }, status=status.HTTP_404_NOT_FOUND)
 
-        if session.project.owner != request.user:
+        if not can_view_project(request.user, session.project):
             return Response({
                 "error": "Access denied.",
                 "code": "FORBIDDEN"
@@ -1024,6 +1055,12 @@ def session_detail_view(request, session_id):
             return Response(serializer.data, status=status.HTTP_200_OK)
 
         elif request.method == "PATCH":
+            if not can_write_research(request.user, session.project):
+                return Response({
+                    "error": "Access denied.",
+                    "code": "FORBIDDEN"
+                }, status=status.HTTP_403_FORBIDDEN)
+
             title = request.data.get("title")
             if title is not None:
                 if not isinstance(title, str) or not title.strip():
@@ -1073,6 +1110,12 @@ def session_detail_view(request, session_id):
             return Response(serializer.data, status=status.HTTP_200_OK)
 
         elif request.method == "DELETE":
+            if not can_write_research(request.user, session.project):
+                return Response({
+                    "error": "Access denied.",
+                    "code": "FORBIDDEN"
+                }, status=status.HTTP_403_FORBIDDEN)
+
             session.delete()
             return Response(status=status.HTTP_204_NO_CONTENT)
 

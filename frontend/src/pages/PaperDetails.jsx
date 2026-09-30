@@ -1,18 +1,24 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useContext } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import api from "../services/api";
+import { AuthContext } from "../context/AuthContext";
 import Card from "../components/Card";
 import Button from "../components/Button";
+import { getProjectMembers, determineUserRole } from "../services/collaboration";
 
 function PaperDetails() {
     const { projectId, paperId } = useParams();
     const navigate = useNavigate();
+    const { user } = useContext(AuthContext);
     const [searchParams] = useSearchParams();
     const pageParam = searchParams.get("page");
 
     const [paper, setPaper] = useState(null);
+    const [userRole, setUserRole] = useState("VIEWER");
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
+
+    const canEditPaper = userRole === "OWNER" || userRole === "EDITOR";
 
     const [showDeletePopup, setShowDeletePopup] = useState(false);
     const [paperToDelete, setPaperToDelete] = useState(null);
@@ -43,6 +49,7 @@ function PaperDetails() {
     const [renameError, setRenameError] = useState("");
 
     const handleSaveTitle = async () => {
+        if (!canEditPaper) return;
         const trimmed = editTitle.trim();
         if (!trimmed) {
             setRenameError("Paper title cannot be empty.");
@@ -91,6 +98,21 @@ function PaperDetails() {
                 const data = response.data;
                 setPaper(data);
 
+                // Fetch project metadata to determine user's role
+                try {
+                    const projRes = await api.get(`/projects/${projectId}/`);
+                    const projData = projRes.data;
+                    if (user && projData.owner === user.username) {
+                        setUserRole("OWNER");
+                    } else {
+                        const members = await getProjectMembers(projectId);
+                        const role = determineUserRole(projData, user, members);
+                        setUserRole(role || "VIEWER");
+                    }
+                } catch {
+                    setUserRole("VIEWER");
+                }
+
                 // Build the base PDF URL (strip any server origin for same-host serving)
                 if (data.file) {
                     const base = data.file.replace("http://localhost:8000", "");
@@ -110,7 +132,7 @@ function PaperDetails() {
         };
 
         fetchPaper();
-    }, [projectId, paperId]);
+    }, [projectId, paperId, user]);
 
     useEffect(() => {
         if (pdfBaseUrl.current && pageParam) {
@@ -349,52 +371,54 @@ function PaperDetails() {
                 <div>
                     {!isEditingTitle ? (
                         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.5rem", flexWrap: "wrap" }}>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setEditTitle(paper.title);
-                                    setRenameError("");
-                                    setIsEditingTitle(true);
-                                }}
-                                title="Rename paper"
-                                aria-label="Rename paper"
-                                style={{
-                                    background: "transparent",
-                                    border: "1px solid transparent",
-                                    borderRadius: "var(--radius-sm, 6px)",
-                                    color: "var(--text-secondary)",
-                                    cursor: "pointer",
-                                    padding: "6px",
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    transition: "all 0.15s ease",
-                                }}
-                                onMouseEnter={(e) => {
-                                    e.currentTarget.style.color = "var(--text-primary)";
-                                    e.currentTarget.style.backgroundColor = "var(--bg-surface-raised, rgba(255,255,255,0.08))";
-                                    e.currentTarget.style.borderColor = "var(--border-color, rgba(255,255,255,0.12))";
-                                }}
-                                onMouseLeave={(e) => {
-                                    e.currentTarget.style.color = "var(--text-secondary)";
-                                    e.currentTarget.style.backgroundColor = "transparent";
-                                    e.currentTarget.style.borderColor = "transparent";
-                                }}
-                            >
-                                <svg
-                                    width="18"
-                                    height="18"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    aria-hidden="true"
+                            {canEditPaper && (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setEditTitle(paper.title);
+                                        setRenameError("");
+                                        setIsEditingTitle(true);
+                                    }}
+                                    title="Rename paper"
+                                    aria-label="Rename paper"
+                                    style={{
+                                        background: "transparent",
+                                        border: "1px solid transparent",
+                                        borderRadius: "var(--radius-sm, 6px)",
+                                        color: "var(--text-secondary)",
+                                        cursor: "pointer",
+                                        padding: "6px",
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        transition: "all 0.15s ease",
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        e.currentTarget.style.color = "var(--text-primary)";
+                                        e.currentTarget.style.backgroundColor = "var(--bg-surface-raised, rgba(255,255,255,0.08))";
+                                        e.currentTarget.style.borderColor = "var(--border-color, rgba(255,255,255,0.12))";
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.currentTarget.style.color = "var(--text-secondary)";
+                                        e.currentTarget.style.backgroundColor = "transparent";
+                                        e.currentTarget.style.borderColor = "transparent";
+                                    }}
                                 >
-                                    <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
-                                </svg>
-                            </button>
+                                    <svg
+                                        width="18"
+                                        height="18"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        aria-hidden="true"
+                                    >
+                                        <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+                                    </svg>
+                                </button>
+                            )}
 
                             <h1
                                 style={{
@@ -405,6 +429,16 @@ function PaperDetails() {
                             >
                                 {paper.title}
                             </h1>
+
+                            <span className={`invitation-role-badge ${
+                                userRole === "OWNER"
+                                    ? "role-badge-owner"
+                                    : userRole === "EDITOR"
+                                    ? "role-badge-editor"
+                                    : "role-badge-viewer"
+                            }`}>
+                                {userRole === "OWNER" ? "Owner" : userRole === "EDITOR" ? "Editor" : "Viewer"}
+                            </span>
                         </div>
                     ) : (
                         <div style={{ marginBottom: "0.75rem" }}>
@@ -477,15 +511,17 @@ function PaperDetails() {
                     </p>
                 </div>
 
-                <button
-                    className="delete-button"
-                    onClick={() => {
-                        setPaperToDelete(paper);
-                        setShowDeletePopup(true);
-                    }}
-                >
-                    Delete
-                </button>
+                {canEditPaper && (
+                    <button
+                        className="delete-button"
+                        onClick={() => {
+                            setPaperToDelete(paper);
+                            setShowDeletePopup(true);
+                        }}
+                    >
+                        Delete
+                    </button>
+                )}
             </div>
 
             <div

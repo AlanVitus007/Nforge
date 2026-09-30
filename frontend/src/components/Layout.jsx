@@ -28,7 +28,7 @@ const Layout = ({ children }) => {
           </div>
           
           <nav className="nav-links">
-            <Link to="/projects" className="nav-link">Projects</Link>
+            {user && <Link to="/projects" className="nav-link">Projects</Link>}
             <Link to="/backend-test" className="nav-link">API Status</Link>
           </nav>
 

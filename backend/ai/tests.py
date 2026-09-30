@@ -734,8 +734,8 @@ class AskAIPersistenceAPITests(TestCase):
             "session_id": self.session1.id,
         }, format="json")
 
-        self.assertEqual(resp.status_code, 400)
-        self.assertIn("does not belong to this research session", resp.json()["error"])
+        self.assertEqual(resp.status_code, 403)
+        self.assertIn("Access denied", resp.json()["error"])
 
     def test_ask_ai_gemini_failure_rolls_back_user_message(self):
         self.client.force_authenticate(user=self.user1)

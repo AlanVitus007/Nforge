@@ -1,13 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useContext, useCallback } from "react";
 import { Link } from "react-router-dom";
 import api from "../services/api";
+import { AuthContext } from "../context/AuthContext";
 import Card from "../components/Card";
 import Button from "../components/Button";
 import Input from "../components/Input";
 import DeleteModal from "../components/DeleteModal";
+import ProjectInvitations from "../components/ProjectInvitations";
+import { getProjectMembers } from "../services/collaboration";
 
 function Projects() {
+    const { user } = useContext(AuthContext);
     const [projects, setProjects] = useState([]);
+    const [projectRoles, setProjectRoles] = useState({});
     const [title, setTitle] = useState("");
     const [description, setDescription] = useState("");
     const [loading, setLoading] = useState(true);
@@ -16,22 +21,44 @@ function Projects() {
     const [deleteModal, setDeleteModal] = useState({ open: false, projectId: null, projectTitle: '' });
     const [isDeleting, setIsDeleting] = useState(false);
 
-    const fetchProjects = async () => {
+    const fetchProjects = useCallback(async () => {
         try {
             setLoading(true);
             setError("");
             const response = await api.get("/projects/");
-            setProjects(response.data);
+            const projectList = response.data || [];
+            setProjects(projectList);
+
+            // Fetch member roles for shared projects
+            if (user && projectList.length > 0) {
+                const sharedProjects = projectList.filter((p) => p.owner !== user.username);
+                if (sharedProjects.length > 0) {
+                    const roleEntries = await Promise.all(
+                        sharedProjects.map(async (p) => {
+                            try {
+                                const members = await getProjectMembers(p.id);
+                                const myMember = members.find(
+                                    (m) => m.username === user.username || m.user_id === user.id
+                                );
+                                return [p.id, myMember?.role || "VIEWER"];
+                            } catch {
+                                return [p.id, "VIEWER"];
+                            }
+                        })
+                    );
+                    setProjectRoles(Object.fromEntries(roleEntries));
+                }
+            }
         } catch (err) {
             setError("Failed to load projects.");
         } finally {
             setLoading(false);
         }
-    };
+    }, [user]);
 
     useEffect(() => {
         fetchProjects();
-    }, []);
+    }, [fetchProjects]);
 
     const handleCreate = async (e) => {
         e.preventDefault();
@@ -97,6 +124,9 @@ function Projects() {
                 </div>
             )}
 
+            {/* Pending Invitations Banner */}
+            <ProjectInvitations onAccepted={fetchProjects} />
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '2rem' }}>
                 <aside>
                     <Card>
@@ -141,27 +171,71 @@ function Projects() {
                         </Card>
                     ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                            {projects.map((project) => (
-                                <Card key={project.id} className="card-glass" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                    <div>
-                                        <h3 style={{ margin: '0 0 0.5rem 0' }}>
-                                            <Link to={`/projects/${project.id}`} style={{ color: 'var(--text-primary)' }}>
-                                                {project.title}
-                                            </Link>
-                                        </h3>
-                                        <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                                            {project.description || "No description."}
-                                        </p>
-                                    </div>
-                                    <Button 
-                                        variant="danger" 
-                                        onClick={() => openDeleteModal(project.id, project.title)}
-                                        style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                            {projects.map((project) => {
+                                const isOwner = user && project.owner === user.username;
+                                const role = isOwner
+                                    ? "OWNER"
+                                    : projectRoles[project.id] || "VIEWER";
+                                const roleBadgeClass =
+                                    role === "OWNER"
+                                        ? "role-badge-owner"
+                                        : role === "EDITOR"
+                                        ? "role-badge-editor"
+                                        : "role-badge-viewer";
+
+                                return (
+                                    <Card
+                                        key={project.id}
+                                        className="card-glass"
+                                        style={{
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'flex-start',
+                                            gap: '1rem',
+                                        }}
                                     >
-                                        Delete
-                                    </Button>
-                                </Card>
-                            ))}
+                                        <div style={{ flex: 1 }}>
+                                            <div
+                                                style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.65rem',
+                                                    marginBottom: '0.5rem',
+                                                    flexWrap: 'wrap',
+                                                }}
+                                            >
+                                                <h3 style={{ margin: 0 }}>
+                                                    <Link
+                                                        to={`/projects/${project.id}`}
+                                                        style={{ color: 'var(--text-primary)' }}
+                                                    >
+                                                        {project.title}
+                                                    </Link>
+                                                </h3>
+                                                <span className={`invitation-role-badge ${roleBadgeClass}`}>
+                                                    {role === "OWNER" ? "Owner" : role === "EDITOR" ? "Editor" : "Viewer"}
+                                                </span>
+                                            </div>
+                                            <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                                                {project.description || "No description."}
+                                            </p>
+                                            <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                                Owner: @{project.owner} &bull; {project.paper_count || 0} {project.paper_count === 1 ? 'paper' : 'papers'}
+                                            </div>
+                                        </div>
+
+                                        {isOwner && (
+                                            <Button 
+                                                variant="danger" 
+                                                onClick={() => openDeleteModal(project.id, project.title)}
+                                                style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', flexShrink: 0 }}
+                                            >
+                                                Delete
+                                            </Button>
+                                        )}
+                                    </Card>
+                                );
+                            })}
                         </div>
                     )}
                 </section>

@@ -1,8 +1,10 @@
-import React, { useContext, useEffect, useState } from 'react';
+import React, { useContext, useEffect, useState, useCallback } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { useNavigate, Link } from 'react-router-dom';
 import api from '../services/api';
 import Button from '../components/Button';
+import ProjectInvitations from '../components/ProjectInvitations';
+import { getProjectMembers } from '../services/collaboration';
 import './Dashboard.css';
 
 const Dashboard = () => {
@@ -10,6 +12,7 @@ const Dashboard = () => {
     const navigate = useNavigate();
 
     const [projects, setProjects] = useState([]);
+    const [projectRoles, setProjectRoles] = useState({});
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     
@@ -23,24 +26,44 @@ const Dashboard = () => {
         }
     }, [user, authLoading, navigate]);
 
-    useEffect(() => {
-        const fetchDashboardData = async () => {
-            if (!user) return;
-            try {
-                setLoading(true);
-                setError('');
-                const res = await api.get('/projects/');
-                setProjects(res.data || []);
-            } catch (err) {
-                console.error('Failed to fetch dashboard data', err);
-                setError('Unable to load workspace data. Please check connection.');
-            } finally {
-                setLoading(false);
-            }
-        };
+    const fetchDashboardData = useCallback(async () => {
+        if (!user) return;
+        try {
+            setLoading(true);
+            setError('');
+            const res = await api.get('/projects/');
+            const projectList = res.data || [];
+            setProjects(projectList);
 
-        fetchDashboardData();
+            // Fetch member roles for shared projects
+            const sharedProjects = projectList.filter((p) => p.owner !== user.username);
+            if (sharedProjects.length > 0) {
+                const roleEntries = await Promise.all(
+                    sharedProjects.map(async (p) => {
+                        try {
+                            const members = await getProjectMembers(p.id);
+                            const myMember = members.find(
+                                (m) => m.username === user.username || m.user_id === user.id
+                            );
+                            return [p.id, myMember?.role || 'VIEWER'];
+                        } catch {
+                            return [p.id, 'VIEWER'];
+                        }
+                    })
+                );
+                setProjectRoles(Object.fromEntries(roleEntries));
+            }
+        } catch (err) {
+            console.error('Failed to fetch dashboard data', err);
+            setError('Unable to load workspace data. Please check connection.');
+        } finally {
+            setLoading(false);
+        }
     }, [user]);
+
+    useEffect(() => {
+        fetchDashboardData();
+    }, [fetchDashboardData]);
 
     const runDiagnostic = async () => {
         try {
@@ -117,6 +140,9 @@ const Dashboard = () => {
                     {error}
                 </div>
             )}
+
+            {/* Pending Invitations Banner */}
+            <ProjectInvitations onAccepted={fetchDashboardData} />
 
             {/* Metrics Overview Strip */}
             <section className="dashboard-stats-grid">
@@ -196,21 +222,38 @@ const Dashboard = () => {
                     </div>
                 ) : (
                     <div className="projects-grid">
-                        {recentProjects.map((proj) => (
-                            <Link 
-                                to={`/projects/${proj.id}`} 
-                                key={proj.id} 
-                                className="project-card-item"
-                            >
-                                <div>
-                                    <div className="project-card-top">
-                                        <h4 className="project-card-title">{proj.title}</h4>
-                                        <span className="project-card-arrow">&rarr;</span>
+                        {recentProjects.map((proj) => {
+                            const isOwner = user && proj.owner === user.username;
+                            const role = isOwner
+                                ? "OWNER"
+                                : projectRoles[proj.id] || "VIEWER";
+                            const roleBadgeClass =
+                                role === "OWNER"
+                                    ? "role-badge-owner"
+                                    : role === "EDITOR"
+                                    ? "role-badge-editor"
+                                    : "role-badge-viewer";
+
+                            return (
+                                <Link 
+                                    to={`/projects/${proj.id}`} 
+                                    key={proj.id} 
+                                    className="project-card-item"
+                                >
+                                    <div>
+                                        <div className="project-card-top">
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                                <h4 className="project-card-title" style={{ margin: 0 }}>{proj.title}</h4>
+                                                <span className={`invitation-role-badge ${roleBadgeClass}`}>
+                                                    {role === "OWNER" ? "Owner" : role === "EDITOR" ? "Editor" : "Viewer"}
+                                                </span>
+                                            </div>
+                                            <span className="project-card-arrow">&rarr;</span>
+                                        </div>
+                                        <p className="project-card-desc">
+                                            {proj.description || "No project description provided."}
+                                        </p>
                                     </div>
-                                    <p className="project-card-desc">
-                                        {proj.description || "No project description provided."}
-                                    </p>
-                                </div>
 
                                 <div className="project-card-footer">
                                     <span className="paper-count-badge">
@@ -222,7 +265,8 @@ const Dashboard = () => {
                                     <span>{formatDate(proj.created_at)}</span>
                                 </div>
                             </Link>
-                        ))}
+                        );
+                    })}
 
                         {/* Quick create shortcut card */}
                         <div 

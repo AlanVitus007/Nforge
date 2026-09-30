@@ -1,13 +1,22 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useContext, useCallback } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import api from "../services/api";
+import { AuthContext } from "../context/AuthContext";
 import Card from "../components/Card";
 import Button from "../components/Button";
 import Input from "../components/Input";
+import {
+    getProjectMembers,
+    inviteMember,
+    removeProjectMember,
+    determineUserRole,
+} from "../services/collaboration";
+import "./ProjectDetails.css";
 
 function ProjectDetails() {
     const { id } = useParams();
     const navigate = useNavigate();
+    const { user } = useContext(AuthContext);
 
     const [project, setProject] = useState(null);
     const [papers, setPapers] = useState([]);
@@ -16,6 +25,17 @@ function ProjectDetails() {
     const [loading, setLoading] = useState(true);
     const [uploading, setUploading] = useState(false);
     const [error, setError] = useState("");
+
+    // Collaboration state
+    const [members, setMembers] = useState([]);
+    const [loadingMembers, setLoadingMembers] = useState(false);
+    const [inviteUsername, setInviteUsername] = useState("");
+    const [inviteRole, setInviteRole] = useState("VIEWER");
+    const [inviting, setInviting] = useState(false);
+    const [inviteError, setInviteError] = useState("");
+    const [inviteSuccess, setInviteSuccess] = useState("");
+    const [removingMemberId, setRemovingMemberId] = useState(null);
+    const [memberError, setMemberError] = useState("");
 
     const [showDeletePopup, setShowDeletePopup] = useState(false);
     const [paperToDelete, setPaperToDelete] = useState(null);
@@ -32,7 +52,14 @@ function ProjectDetails() {
     const [isSavingTitle, setIsSavingTitle] = useState(false);
     const [renameError, setRenameError] = useState("");
 
+    const isOwner = Boolean(user && project && project.owner === user.username);
+    const currentRole = determineUserRole(project, user, members);
+    const isEditor = currentRole === "EDITOR";
+    const isViewer = currentRole === "VIEWER";
+    const canEditContent = isOwner || isEditor;
+
     const handleSaveTitle = async () => {
+        if (!isOwner) return;
         const trimmed = editTitle.trim();
         if (!trimmed) {
             setRenameError("Project title cannot be empty.");
@@ -78,6 +105,20 @@ function ProjectDetails() {
         }
     };
 
+    const fetchMembers = async () => {
+        try {
+            setLoadingMembers(true);
+            setMemberError("");
+            const data = await getProjectMembers(id);
+            setMembers(Array.isArray(data) ? data : []);
+        } catch (err) {
+            // If viewer or member, backend allows GET members. If error, log safely
+            console.error("Failed to load members", err);
+        } finally {
+            setLoadingMembers(false);
+        }
+    };
+
     useEffect(() => {
         const loadData = async () => {
             setLoading(true);
@@ -85,12 +126,60 @@ function ProjectDetails() {
 
             await fetchProject();
             await fetchPapers();
+            await fetchMembers();
 
             setLoading(false);
         };
 
         loadData();
     }, [id]);
+
+    const handleInvite = async (e) => {
+        e.preventDefault();
+        const trimmed = inviteUsername.trim();
+        if (!trimmed) {
+            setInviteError("Please enter a username to invite.");
+            return;
+        }
+        try {
+            setInviting(true);
+            setInviteError("");
+            setInviteSuccess("");
+
+            await inviteMember(id, trimmed, inviteRole);
+            setInviteSuccess(`Invitation sent to @${trimmed} as ${inviteRole}.`);
+            setInviteUsername("");
+            setInviteRole("VIEWER");
+        } catch (err) {
+            console.error("Failed to invite collaborator", err);
+            setInviteError(
+                err.response?.data?.detail ||
+                err.response?.data?.username?.[0] ||
+                "Failed to send invitation."
+            );
+        } finally {
+            setInviting(false);
+        }
+    };
+
+    const handleRemoveMember = async (memberUserId, memberUsername) => {
+        if (!window.confirm(`Are you sure you want to remove @${memberUsername} from this project?`)) {
+            return;
+        }
+        try {
+            setRemovingMemberId(memberUserId);
+            setMemberError("");
+            await removeProjectMember(id, memberUserId);
+            setMembers((prev) =>
+                prev.filter((m) => (m.user_id || m.user) !== memberUserId)
+            );
+        } catch (err) {
+            console.error("Failed to remove collaborator", err);
+            setMemberError(err.response?.data?.detail || "Failed to remove collaborator.");
+        } finally {
+            setRemovingMemberId(null);
+        }
+    };
 
     const handleUpload = async (e) => {
         e.preventDefault();
@@ -272,52 +361,54 @@ function ProjectDetails() {
                 <div>
                     {!isEditingTitle ? (
                         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.5rem", flexWrap: "wrap" }}>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setEditTitle(project.title);
-                                    setRenameError("");
-                                    setIsEditingTitle(true);
-                                }}
-                                title="Rename project"
-                                aria-label="Rename project"
-                                style={{
-                                    background: "transparent",
-                                    border: "1px solid transparent",
-                                    borderRadius: "var(--radius-sm, 6px)",
-                                    color: "var(--text-secondary)",
-                                    cursor: "pointer",
-                                    padding: "6px",
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    transition: "all 0.15s ease",
-                                }}
-                                onMouseEnter={(e) => {
-                                    e.currentTarget.style.color = "var(--text-primary)";
-                                    e.currentTarget.style.backgroundColor = "var(--bg-surface-raised, rgba(255,255,255,0.08))";
-                                    e.currentTarget.style.borderColor = "var(--border-color, rgba(255,255,255,0.12))";
-                                }}
-                                onMouseLeave={(e) => {
-                                    e.currentTarget.style.color = "var(--text-secondary)";
-                                    e.currentTarget.style.backgroundColor = "transparent";
-                                    e.currentTarget.style.borderColor = "transparent";
-                                }}
-                            >
-                                <svg
-                                    width="20"
-                                    height="20"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    aria-hidden="true"
+                            {isOwner && (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setEditTitle(project.title);
+                                        setRenameError("");
+                                        setIsEditingTitle(true);
+                                    }}
+                                    title="Rename project"
+                                    aria-label="Rename project"
+                                    style={{
+                                        background: "transparent",
+                                        border: "1px solid transparent",
+                                        borderRadius: "var(--radius-sm, 6px)",
+                                        color: "var(--text-secondary)",
+                                        cursor: "pointer",
+                                        padding: "6px",
+                                        display: "inline-flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        transition: "all 0.15s ease",
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        e.currentTarget.style.color = "var(--text-primary)";
+                                        e.currentTarget.style.backgroundColor = "var(--bg-surface-raised, rgba(255,255,255,0.08))";
+                                        e.currentTarget.style.borderColor = "var(--border-color, rgba(255,255,255,0.12))";
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.currentTarget.style.color = "var(--text-secondary)";
+                                        e.currentTarget.style.backgroundColor = "transparent";
+                                        e.currentTarget.style.borderColor = "transparent";
+                                    }}
                                 >
-                                    <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
-                                </svg>
-                            </button>
+                                    <svg
+                                        width="20"
+                                        height="20"
+                                        viewBox="0 0 24 24"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        aria-hidden="true"
+                                    >
+                                        <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+                                    </svg>
+                                </button>
+                            )}
 
                             <h1
                                 style={{
@@ -328,6 +419,12 @@ function ProjectDetails() {
                             >
                                 {project.title}
                             </h1>
+
+                            <span className={`invitation-role-badge ${
+                                isOwner ? "role-badge-owner" : isEditor ? "role-badge-editor" : "role-badge-viewer"
+                            }`}>
+                                {isOwner ? "Owner" : isEditor ? "Editor" : "Viewer"}
+                            </span>
                         </div>
                     ) : (
                         <div style={{ marginBottom: "0.75rem" }}>
@@ -418,84 +515,86 @@ function ProjectDetails() {
             <div
                 style={{
                     display: "grid",
-                    gridTemplateColumns: "minmax(280px, 1fr) minmax(0, 2.5fr)",
+                    gridTemplateColumns: canEditContent ? "minmax(280px, 1fr) minmax(0, 2.5fr)" : "1fr",
                     gap: "2rem",
                 }}
             >
-                <aside>
-                    <Card>
-                        <h3
-                            style={{
-                                marginTop: 0,
-                                marginBottom: "1.5rem",
-                            }}
-                        >
-                            Upload Research Paper
-                        </h3>
-
-                        {error && (
-                            <div
+                {canEditContent && (
+                    <aside>
+                        <Card>
+                            <h3
                                 style={{
-                                    padding: "0.75rem",
-                                    background:
-                                        "rgba(239, 68, 68, 0.1)",
-                                    color: "var(--danger)",
-                                    borderRadius: "var(--radius-md)",
-                                    marginBottom: "1rem",
-                                    fontSize: "0.875rem",
+                                    marginTop: 0,
+                                    marginBottom: "1.5rem",
                                 }}
                             >
-                                {error}
-                            </div>
-                        )}
+                                Upload Research Paper
+                            </h3>
 
-                        <form
-                            onSubmit={handleUpload}
-                            style={{
-                                display: "flex",
-                                flexDirection: "column",
-                                gap: "1rem",
-                            }}
-                        >
-                            <Input
-                                label="Paper Title"
-                                id="title"
-                                type="text"
-                                value={title}
-                                onChange={(e) =>
-                                    setTitle(e.target.value)
-                                }
-                                placeholder="Enter title"
-                            />
+                            {error && (
+                                <div
+                                    style={{
+                                        padding: "0.75rem",
+                                        background:
+                                            "rgba(239, 68, 68, 0.1)",
+                                        color: "var(--danger)",
+                                        borderRadius: "var(--radius-md)",
+                                        marginBottom: "1rem",
+                                        fontSize: "0.875rem",
+                                    }}
+                                >
+                                    {error}
+                                </div>
+                            )}
 
-                            <div className="input-group">
-                                <label htmlFor="paper-file">
-                                    PDF Document
-                                </label>
-
-                                <input
-                                    id="paper-file"
-                                    type="file"
-                                    accept=".pdf,application/pdf"
-                                    onChange={(e) =>
-                                        setFile(e.target.files[0])
-                                    }
-                                    className="input"
-                                />
-                            </div>
-
-                            <Button
-                                type="submit"
-                                disabled={uploading}
-                                style={{ marginTop: "0.5rem" }}
+                            <form
+                                onSubmit={handleUpload}
+                                style={{
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: "1rem",
+                                }}
                             >
-                                {uploading
-                                    ? "Uploading..."
-                                    : "Upload Paper"}
-                            </Button>
-                        </form>
-                    </Card>
-                </aside>
+                                <Input
+                                    label="Paper Title"
+                                    id="title"
+                                    type="text"
+                                    value={title}
+                                    onChange={(e) =>
+                                        setTitle(e.target.value)
+                                    }
+                                    placeholder="Enter title"
+                                />
+
+                                <div className="input-group">
+                                    <label htmlFor="paper-file">
+                                        PDF Document
+                                    </label>
+
+                                    <input
+                                        id="paper-file"
+                                        type="file"
+                                        accept=".pdf,application/pdf"
+                                        onChange={(e) =>
+                                            setFile(e.target.files[0])
+                                        }
+                                        className="input"
+                                    />
+                                </div>
+
+                                <Button
+                                    type="submit"
+                                    disabled={uploading}
+                                    style={{ marginTop: "0.5rem" }}
+                                >
+                                    {uploading
+                                        ? "Uploading..."
+                                        : "Upload Paper"}
+                                </Button>
+                            </form>
+                        </Card>
+                    </aside>
+                )}
 
                 <section>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem", flexWrap: "wrap", gap: "1rem" }}>
@@ -675,12 +774,14 @@ function ProjectDetails() {
                                                 </Button>
                                             </Link>
 
-                                            <button
-                                                className="delete-button"
-                                                onClick={() => openDeletePopup(paper)}
-                                            >
-                                                Delete
-                                            </button>
+                                            {canEditContent && (
+                                                <button
+                                                    className="delete-button"
+                                                    onClick={() => openDeletePopup(paper)}
+                                                >
+                                                    Delete
+                                                </button>
+                                            )}
                                         </div>
                                     </Card>
                                 );
@@ -689,6 +790,130 @@ function ProjectDetails() {
                     )}
                 </section>
             </div>
+
+            {/* Collaboration & Team Members Section */}
+            <section className="collaboration-card" aria-label="Project Collaborators">
+                <div className="collaboration-header">
+                    <div className="collaboration-title-wrap">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--accent-primary)" }}>
+                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                            <circle cx="9" cy="7" r="4"></circle>
+                            <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                        </svg>
+                        <h3 className="collaboration-title">Project Collaborators</h3>
+                        <span className="invitations-count-badge">
+                            {1 + members.filter((m) => m.username !== project.owner).length}
+                        </span>
+                    </div>
+                </div>
+
+                {memberError && <div className="collaboration-alert error">{memberError}</div>}
+
+                <div className={isOwner ? "collaboration-grid" : ""}>
+                    {/* Members List */}
+                    <div className="members-list-panel">
+                        {/* Authoritative Owner Entry */}
+                        <div className="member-item-row">
+                            <div className="member-user-info">
+                                <span className="member-username">@{project.owner}</span>
+                                <span className="invitation-role-badge role-badge-owner">Owner</span>
+                                <span className="member-meta-text">&bull; Project Creator</span>
+                            </div>
+                        </div>
+
+                        {/* Other Project Members */}
+                        {members
+                            .filter((m) => m.username !== project.owner)
+                            .map((member) => {
+                                const memberRoleClass =
+                                    member.role === "EDITOR" ? "role-badge-editor" : "role-badge-viewer";
+                                const mUserId = member.user_id || member.user;
+                                const isRemoving = removingMemberId === mUserId;
+
+                                return (
+                                    <div key={member.id} className="member-item-row">
+                                        <div className="member-user-info">
+                                            <span className="member-username">@{member.username}</span>
+                                            <span className={`invitation-role-badge ${memberRoleClass}`}>
+                                                {member.role === "EDITOR" ? "Editor" : "Viewer"}
+                                            </span>
+                                            {member.created_at && (
+                                                <span className="member-meta-text">
+                                                    &bull; Joined {new Date(member.created_at).toLocaleDateString()}
+                                                </span>
+                                            )}
+                                        </div>
+
+                                        {isOwner && (
+                                            <button
+                                                type="button"
+                                                className="member-remove-btn"
+                                                onClick={() => handleRemoveMember(mUserId, member.username)}
+                                                disabled={isRemoving}
+                                            >
+                                                {isRemoving ? "Removing..." : "Remove"}
+                                            </button>
+                                        )}
+                                    </div>
+                                );
+                            })}
+
+                        {members.filter((m) => m.username !== project.owner).length === 0 && (
+                            <p style={{ margin: "0.5rem 0", color: "var(--text-muted)", fontSize: "0.875rem" }}>
+                                No collaborators added yet. {isOwner ? "Invite editors or viewers using the form." : ""}
+                            </p>
+                        )}
+                    </div>
+
+                    {/* Invite Form (Owner Only) */}
+                    {isOwner && (
+                        <div className="invite-panel">
+                            <h4 className="invite-panel-title">Invite Member</h4>
+
+                            {inviteSuccess && (
+                                <div className="collaboration-alert success">{inviteSuccess}</div>
+                            )}
+                            {inviteError && (
+                                <div className="collaboration-alert error">{inviteError}</div>
+                            )}
+
+                            <form onSubmit={handleInvite} className="invite-form">
+                                <Input
+                                    label="Username"
+                                    id="invite-username"
+                                    type="text"
+                                    value={inviteUsername}
+                                    onChange={(e) => {
+                                        setInviteUsername(e.target.value);
+                                        if (inviteError) setInviteError("");
+                                    }}
+                                    placeholder="Enter collaborator username"
+                                    disabled={inviting}
+                                />
+
+                                <div className="invite-select-group">
+                                    <label htmlFor="invite-role">Role</label>
+                                    <select
+                                        id="invite-role"
+                                        className="invite-select"
+                                        value={inviteRole}
+                                        onChange={(e) => setInviteRole(e.target.value)}
+                                        disabled={inviting}
+                                    >
+                                        <option value="VIEWER">Viewer (Read-only access)</option>
+                                        <option value="EDITOR">Editor (Can edit papers & sessions)</option>
+                                    </select>
+                                </div>
+
+                                <Button type="submit" disabled={inviting || !inviteUsername.trim()}>
+                                    {inviting ? "Sending Invite..." : "Invite Member"}
+                                </Button>
+                            </form>
+                        </div>
+                    )}
+                </div>
+            </section>
 
             {showDeletePopup && (
                 <div

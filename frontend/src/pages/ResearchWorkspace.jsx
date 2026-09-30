@@ -4,6 +4,7 @@ import api from '../services/api';
 import { AuthContext } from '../context/AuthContext';
 import EvidenceSource from '../components/EvidenceSource';
 import DeleteModal from '../components/DeleteModal';
+import { getProjectMembers, determineUserRole } from '../services/collaboration';
 import './ResearchWorkspace.css';
 
 /**
@@ -466,11 +467,11 @@ const TREND_SHORTCUTS = [
         prompt: 'Analyze how the research problem, techniques, and core focus have evolved across these papers.'
     },
     {
-        label: 'Compare methodologies over the papers',
+        label: 'Compare methodologies',
         prompt: 'Compare how methodologies, experimental approaches, and technical frameworks evolve across these papers.'
     },
     {
-        label: 'Identify emerging research directions',
+        label: 'Identify emerging directions',
         prompt: 'Identify emerging research directions, newly explored paradigms, and novel topics across these papers.'
     },
     {
@@ -540,6 +541,10 @@ function ResearchWorkspace() {
     const [trendError, setTrendError] = useState('');
 
     // Loading & Action states
+    const [userRole, setUserRole] = useState("VIEWER");
+    const isViewer = userRole === "VIEWER";
+    const canEditResearch = userRole === "OWNER" || userRole === "EDITOR";
+
     const [loadingList, setLoadingList] = useState(true);
     const [loadingSession, setLoadingSession] = useState(false);
     const [creatingSession, setCreatingSession] = useState(false);
@@ -644,10 +649,23 @@ function ResearchWorkspace() {
                 setLoadingList(true);
                 setListError('');
 
-                // 1. Fetch project meta for breadcrumb
+                // 1. Fetch project meta for breadcrumb and role determination
                 try {
                     const projRes = await api.get(`/projects/${projectId}/`);
-                    setProject(projRes.data);
+                    const projData = projRes.data;
+                    setProject(projData);
+
+                    if (user && projData.owner === user.username) {
+                        setUserRole("OWNER");
+                    } else {
+                        try {
+                            const members = await getProjectMembers(projectId);
+                            const role = determineUserRole(projData, user, members);
+                            setUserRole(role || "VIEWER");
+                        } catch {
+                            setUserRole("VIEWER");
+                        }
+                    }
                 } catch {
                     // Non-fatal
                 }
@@ -685,7 +703,7 @@ function ResearchWorkspace() {
         };
 
         loadProjectAndSessions();
-    }, [projectId, handleSelectSession]);
+    }, [projectId, user, handleSelectSession]);
 
     // Close menu when clicking outside
     useEffect(() => {
@@ -696,7 +714,7 @@ function ResearchWorkspace() {
 
     // Create a new session (0 Gemini calls)
     const handleCreateSession = async () => {
-        if (creatingSession) return;
+        if (creatingSession || isViewer) return;
         try {
             setCreatingSession(true);
             setActionError('');
@@ -739,6 +757,7 @@ function ResearchWorkspace() {
 
     // Rename session
     const startRename = (session, e) => {
+        if (isViewer) return;
         if (e) e.stopPropagation();
         setRenamingSessionId(session.id);
         setRenameTitle(session.title || '');
@@ -752,6 +771,7 @@ function ResearchWorkspace() {
     };
 
     const handleSaveRename = async (sessionId, e) => {
+        if (isViewer) return;
         if (e) {
             e.preventDefault();
             e.stopPropagation();
@@ -791,13 +811,14 @@ function ResearchWorkspace() {
 
     // Delete session
     const openDeleteModal = (session, e) => {
+        if (isViewer) return;
         if (e) e.stopPropagation();
         setDeletingSession(session);
         setOpenMenuId(null);
     };
 
     const handleConfirmDelete = async () => {
-        if (!deletingSession || isDeleting) return;
+        if (!deletingSession || isDeleting || isViewer) return;
         const targetId = deletingSession.id;
         try {
             setIsDeleting(true);
@@ -828,6 +849,7 @@ function ResearchWorkspace() {
 
     // Open Paper Selection Modal
     const openAddPapersModal = () => {
+        if (isViewer) return;
         const currentPaperIds = (activeSession?.papers || []).map((p) => p.id);
         setSelectedModalPaperIds(currentPaperIds);
         setIsPapersModalOpen(true);
@@ -842,7 +864,7 @@ function ResearchWorkspace() {
 
     // Save Papers to Session via PATCH
     const handleSaveSessionPapers = async () => {
-        if (!activeSessionId) return;
+        if (!activeSessionId || isViewer) return;
         try {
             setSavingPapers(true);
             setActionError('');
@@ -921,7 +943,7 @@ function ResearchWorkspace() {
 
     // Remove Paper directly from session
     const handleRemovePaperFromSession = async (paperIdToRemove) => {
-        if (removingPaperId || !activeSessionId || !activeSession?.papers) return;
+        if (removingPaperId || !activeSessionId || !activeSession?.papers || isViewer) return;
         const remainingIds = activeSession.papers.filter((p) => p.id !== paperIdToRemove).map((p) => p.id);
 
         try {
@@ -1017,7 +1039,7 @@ function ResearchWorkspace() {
 
     // Send Single-Paper Research Question via POST /api/ai/ask/
     const handleSendQuestion = async () => {
-        if (loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend) return;
+        if (isViewer || loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend) return;
         const trimmed = questionText.trim();
         if (!trimmed) return;
         if (!selectedPaperId || !activeSessionId) return;
@@ -1114,7 +1136,7 @@ function ResearchWorkspace() {
 
     // Send Multi-Paper Comparison via POST /api/ai/compare/
     const handleGenerateComparison = async () => {
-        if (loadingCompare || loadingAsk || loadingGap || loadingThematic || loadingTrend) return;
+        if (isViewer || loadingCompare || loadingAsk || loadingGap || loadingThematic || loadingTrend) return;
 
         if (selectedComparisonPaperIds.length < 2 || selectedComparisonPaperIds.length > 4) {
             setCompareError('Please select between 2 and 4 papers for comparison.');
@@ -1204,7 +1226,7 @@ function ResearchWorkspace() {
 
     // Send Multi-Paper Research Gap Analysis via POST /api/ai/gap-analysis/
     const handleGenerateGapAnalysis = async () => {
-        if (loadingGap || loadingCompare || loadingAsk || loadingThematic || loadingTrend) return;
+        if (isViewer || loadingGap || loadingCompare || loadingAsk || loadingThematic || loadingTrend) return;
 
         if (selectedGapPaperIds.length < 2 || selectedGapPaperIds.length > 4) {
             setGapError('Please select between 2 and 4 papers for research gap analysis.');
@@ -1338,7 +1360,7 @@ function ResearchWorkspace() {
 
     // Send Multi-Paper Thematic Analysis via POST /api/ai/thematic-analysis/
     const handleGenerateThematicAnalysis = async () => {
-        if (loadingThematic || loadingGap || loadingCompare || loadingAsk || loadingTrend) return;
+        if (isViewer || loadingThematic || loadingGap || loadingCompare || loadingAsk || loadingTrend) return;
 
         if (selectedThematicPaperIds.length < 2 || selectedThematicPaperIds.length > 4) {
             setThematicError('Please select between 2 and 4 papers for thematic analysis.');
@@ -1467,7 +1489,7 @@ function ResearchWorkspace() {
 
     // Send Multi-Paper Research Trend Analysis via POST /api/ai/research-trends/
     const handleGenerateTrendAnalysis = async () => {
-        if (loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk) return;
+        if (isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk) return;
 
         if (selectedTrendPaperIds.length < 2 || selectedTrendPaperIds.length > 4) {
             setTrendError('Please select between 2 and 4 papers for research trend analysis.');
@@ -2342,15 +2364,17 @@ function ResearchWorkspace() {
                             </span>
                         </div>
 
-                        <button
-                            className="create-session-btn"
-                            onClick={handleCreateSession}
-                            disabled={creatingSession}
-                            type="button"
-                        >
-                            <span style={{ fontSize: '1rem', lineHeight: 1 }}>+</span>
-                            {creatingSession ? 'Creating...' : 'New Research Session'}
-                        </button>
+                        {!isViewer && (
+                            <button
+                                className="create-session-btn"
+                                onClick={handleCreateSession}
+                                disabled={creatingSession}
+                                type="button"
+                            >
+                                <span style={{ fontSize: '1rem', lineHeight: 1 }}>+</span>
+                                {creatingSession ? 'Creating...' : 'New Research Session'}
+                            </button>
+                        )}
                     </div>
 
                     {listError ? (
@@ -2422,49 +2446,51 @@ function ResearchWorkspace() {
                                                 <h4 className="session-title">{session.title}</h4>
                                             )}
 
-                                            <div style={{ position: 'relative' }}>
-                                                <button
-                                                    className="session-menu-trigger"
-                                                    title="Options"
-                                                    type="button"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        setOpenMenuId(openMenuId === session.id ? null : session.id);
-                                                    }}
-                                                >
-                                                    &#8943;
-                                                </button>
-
-                                                {openMenuId === session.id && (
-                                                    <div
-                                                        className="session-dropdown-menu"
-                                                        onClick={(e) => e.stopPropagation()}
+                                            {!isViewer && (
+                                                <div style={{ position: 'relative' }}>
+                                                    <button
+                                                        className="session-menu-trigger"
+                                                        title="Options"
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setOpenMenuId(openMenuId === session.id ? null : session.id);
+                                                        }}
                                                     >
-                                                        <button
-                                                            className="dropdown-item"
-                                                            onClick={(e) => startRename(session, e)}
-                                                            type="button"
+                                                        &#8943;
+                                                    </button>
+
+                                                    {openMenuId === session.id && (
+                                                        <div
+                                                            className="session-dropdown-menu"
+                                                            onClick={(e) => e.stopPropagation()}
                                                         >
-                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                                <path d="M12 20h9"></path>
-                                                                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
-                                                            </svg>
-                                                            Rename
-                                                        </button>
-                                                        <button
-                                                            className="dropdown-item delete"
-                                                            onClick={(e) => openDeleteModal(session, e)}
-                                                            type="button"
-                                                        >
-                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                                <polyline points="3 6 5 6 21 6"></polyline>
-                                                                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
-                                                            </svg>
-                                                            Delete
-                                                        </button>
-                                                    </div>
-                                                )}
-                                            </div>
+                                                            <button
+                                                                className="dropdown-item"
+                                                                onClick={(e) => startRename(session, e)}
+                                                                type="button"
+                                                            >
+                                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                                    <path d="M12 20h9"></path>
+                                                                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                                                                </svg>
+                                                                Rename
+                                                            </button>
+                                                            <button
+                                                                className="dropdown-item delete"
+                                                                onClick={(e) => openDeleteModal(session, e)}
+                                                                type="button"
+                                                            >
+                                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                                    <polyline points="3 6 5 6 21 6"></polyline>
+                                                                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
+                                                                </svg>
+                                                                Delete
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
                                         </div>
 
                                         <div className="session-card-meta">
@@ -2507,18 +2533,22 @@ function ResearchWorkspace() {
                             </div>
                             <h3 className="empty-state-title">No research sessions yet</h3>
                             <p className="empty-state-desc">
-                                Create a session to start your research conversation and view saved synthesis history.
+                                {isViewer
+                                    ? 'No research sessions have been created for this project yet. Sessions created by collaborators will appear here.'
+                                    : 'Create a session to start your research conversation and view saved synthesis history.'}
                             </p>
-                            <button
-                                className="create-session-btn"
-                                style={{ width: 'auto', padding: '0.65rem 1.4rem' }}
-                                onClick={handleCreateSession}
-                                disabled={creatingSession}
-                                type="button"
-                            >
-                                <span style={{ fontSize: '1rem', lineHeight: 1 }}>+</span>
-                                {creatingSession ? 'Creating...' : 'New Research Session'}
-                            </button>
+                            {!isViewer && (
+                                <button
+                                    className="create-session-btn"
+                                    style={{ width: 'auto', padding: '0.65rem 1.4rem' }}
+                                    onClick={handleCreateSession}
+                                    disabled={creatingSession}
+                                    type="button"
+                                >
+                                    <span style={{ fontSize: '1rem', lineHeight: 1 }}>+</span>
+                                    {creatingSession ? 'Creating...' : 'New Research Session'}
+                                </button>
+                            )}
                         </div>
                     ) : !activeSession ? (
                         /* Empty State: Sessions exist but none selected */
@@ -2580,17 +2610,19 @@ function ResearchWorkspace() {
                                     ) : (
                                         <div>
                                             <h2
-                                                className="active-session-title clickable"
-                                                onClick={(e) => startRename(activeSession, e)}
-                                                title="Click to rename session"
+                                                className={`active-session-title ${!isViewer ? 'clickable' : ''}`}
+                                                onClick={!isViewer ? (e) => startRename(activeSession, e) : undefined}
+                                                title={!isViewer ? 'Click to rename session' : activeSession.title}
                                             >
                                                 <span>{activeSession.title}</span>
-                                                <span className="title-edit-hint" aria-label="Edit title">
-                                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                        <path d="M12 20h9"></path>
-                                                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
-                                                    </svg>
-                                                </span>
+                                                {!isViewer && (
+                                                    <span className="title-edit-hint" aria-label="Edit title">
+                                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                            <path d="M12 20h9"></path>
+                                                            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                                                        </svg>
+                                                    </span>
+                                                )}
                                             </h2>
                                             <div className="active-session-meta">
                                                 <span>{formatSessionTime(activeSession.updated_at)}</span>
@@ -2604,25 +2636,39 @@ function ResearchWorkspace() {
                                     )}
                                 </div>
 
-                                <div className="active-session-actions">
-                                    {renamingSessionId !== activeSession.id && (
+                                {!isViewer && (
+                                    <div className="active-session-actions">
+                                        {renamingSessionId !== activeSession.id && (
+                                            <button
+                                                className="action-btn-secondary"
+                                                onClick={(e) => startRename(activeSession, e)}
+                                                type="button"
+                                            >
+                                                Rename
+                                            </button>
+                                        )}
                                         <button
-                                            className="action-btn-secondary"
-                                            onClick={(e) => startRename(activeSession, e)}
+                                            className="action-btn-danger"
+                                            onClick={(e) => openDeleteModal(activeSession, e)}
                                             type="button"
                                         >
-                                            Rename
+                                            Delete
                                         </button>
-                                    )}
-                                    <button
-                                        className="action-btn-danger"
-                                        onClick={(e) => openDeleteModal(activeSession, e)}
-                                        type="button"
-                                    >
-                                        Delete
-                                    </button>
-                                </div>
+                                    </div>
+                                )}
                             </div>
+
+                            {/* Read-Only Viewer Banner */}
+                            {isViewer && (
+                                <div className="workspace-viewer-banner">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <circle cx="12" cy="12" r="10"></circle>
+                                        <line x1="12" y1="16" x2="12" y2="12"></line>
+                                        <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                                    </svg>
+                                    <span>Read-only access &mdash; you can view this research but cannot create or modify analyses.</span>
+                                </div>
+                            )}
 
                             {/* Research Papers Section */}
                             <div className="workspace-papers-bar">
@@ -2639,13 +2685,15 @@ function ResearchWorkspace() {
                                             {activeSession.papers?.length || 0}
                                         </span>
                                     </div>
-                                    <button
-                                        type="button"
-                                        className="add-papers-btn"
-                                        onClick={openAddPapersModal}
-                                    >
-                                        + Add Papers
-                                    </button>
+                                    {!isViewer && (
+                                        <button
+                                            type="button"
+                                            className="add-papers-btn"
+                                            onClick={openAddPapersModal}
+                                        >
+                                            + Add Papers
+                                        </button>
+                                    )}
                                 </div>
                                 <div className="papers-tags-list">
                                     {activeSession.papers && activeSession.papers.length > 0 ? (
@@ -2656,15 +2704,17 @@ function ResearchWorkspace() {
                                                     <polyline points="14 2 14 8 20 8"></polyline>
                                                 </svg>
                                                 <span className="paper-tag-title">{p.title}</span>
-                                                <button
-                                                    type="button"
-                                                    className="paper-tag-remove"
-                                                    onClick={() => handleRemovePaperFromSession(p.id)}
-                                                    disabled={removingPaperId === p.id}
-                                                    title="Remove paper from session"
-                                                >
-                                                    {removingPaperId === p.id ? '...' : '\u00D7'}
-                                                </button>
+                                                {!isViewer && (
+                                                    <button
+                                                        type="button"
+                                                        className="paper-tag-remove"
+                                                        onClick={() => handleRemovePaperFromSession(p.id)}
+                                                        disabled={removingPaperId === p.id}
+                                                        title="Remove paper from session"
+                                                    >
+                                                        {removingPaperId === p.id ? '...' : '\u00D7'}
+                                                    </button>
+                                                )}
                                             </span>
                                         ))
                                     ) : (
@@ -2850,7 +2900,7 @@ function ResearchWorkspace() {
                                                         className="chat-paper-select"
                                                         value={selectedPaperId}
                                                         onChange={(e) => setSelectedPaperId(e.target.value)}
-                                                        disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend}
+                                                        disabled={isViewer || loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend}
                                                     >
                                                         {activeSession.papers.map((p) => (
                                                             <option key={p.id} value={p.id}>
@@ -2873,7 +2923,7 @@ function ResearchWorkspace() {
                                                             key={idx}
                                                             type="button"
                                                             className="prompt-shortcut-btn"
-                                                            disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend}
+                                                            disabled={isViewer || loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend}
                                                             onClick={() => setQuestionText(item.prompt)}
                                                             title={item.prompt}
                                                             aria-label={`Fill prompt: ${item.label}`}
@@ -2892,18 +2942,18 @@ function ResearchWorkspace() {
                                                 <div className="chat-input-row">
                                                     <textarea
                                                         className="chat-textarea"
-                                                        placeholder="Ask a research question... (Shift+Enter for newline)"
+                                                        placeholder={isViewer ? "Read-only access — asking questions is disabled for viewers." : "Ask a research question... (Shift+Enter for newline)"}
                                                         value={questionText}
                                                         onChange={(e) => setQuestionText(e.target.value)}
                                                         onKeyDown={handleKeyDown}
-                                                        disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend}
+                                                        disabled={isViewer || loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend}
                                                         rows={2}
                                                     />
                                                     <button
-                                                        className="chat-send-btn"
+                                                        className={`chat-send-btn ${isViewer ? 'read-only-btn' : ''}`}
                                                         onClick={handleSendQuestion}
-                                                        disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend || !questionText.trim() || !selectedPaperId}
-                                                        title="Send question (Enter)"
+                                                        disabled={isViewer || loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend || !questionText.trim() || !selectedPaperId}
+                                                        title={isViewer ? "Read-only access" : "Send question (Enter)"}
                                                         type="button"
                                                     >
                                                         {loadingAsk ? (
@@ -2914,7 +2964,7 @@ function ResearchWorkspace() {
                                                                 <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
                                                             </svg>
                                                         )}
-                                                        <span>Send</span>
+                                                        <span>{isViewer ? "Read-only" : "Send"}</span>
                                                     </button>
                                                 </div>
                                             </>
@@ -2949,7 +2999,7 @@ function ResearchWorkspace() {
                                                                     <input
                                                                         type="checkbox"
                                                                         checked={isSelected}
-                                                                        disabled={loadingTrend || loadingThematic || loadingCompare || loadingGap || loadingAsk || isMaxReached}
+                                                                        disabled={isViewer || loadingTrend || loadingThematic || loadingCompare || loadingGap || loadingAsk || isMaxReached}
                                                                         onChange={() => handleToggleComparisonPaper(p.id)}
                                                                     />
                                                                     <span className="compare-paper-pill-title">{p.title}</span>
@@ -2976,7 +3026,7 @@ function ResearchWorkspace() {
                                                             key={idx}
                                                             type="button"
                                                             className="prompt-shortcut-btn"
-                                                            disabled={loadingTrend || loadingThematic || loadingCompare || loadingAsk || loadingGap}
+                                                            disabled={isViewer || loadingTrend || loadingThematic || loadingCompare || loadingAsk || loadingGap}
                                                             onClick={() => setComparisonQuestion(item.prompt)}
                                                             title={item.prompt}
                                                             aria-label={`Fill prompt: ${item.label}`}
@@ -2995,17 +3045,17 @@ function ResearchWorkspace() {
                                                 <div className="chat-input-row">
                                                     <textarea
                                                         className="chat-textarea"
-                                                        placeholder="What would you like to compare? e.g. methodology, findings, limitations, and research gaps"
+                                                        placeholder={isViewer ? "Read-only access — cross-paper comparisons are disabled for viewers." : "What would you like to compare? e.g. methodology, findings, limitations, and research gaps"}
                                                         value={comparisonQuestion}
                                                         onChange={(e) => setComparisonQuestion(e.target.value)}
-                                                        disabled={loadingTrend || loadingThematic || loadingCompare || loadingGap || loadingAsk}
+                                                        disabled={isViewer || loadingTrend || loadingThematic || loadingCompare || loadingGap || loadingAsk}
                                                         rows={2}
                                                     />
                                                     <button
-                                                        className="chat-send-btn compare-btn"
+                                                        className={`chat-send-btn compare-btn ${isViewer ? 'read-only-btn' : ''}`}
                                                         onClick={handleGenerateComparison}
-                                                        disabled={loadingTrend || loadingThematic || loadingCompare || loadingGap || loadingAsk || selectedComparisonPaperIds.length < 2 || selectedComparisonPaperIds.length > 4}
-                                                        title="Generate cross-paper comparison"
+                                                        disabled={isViewer || loadingTrend || loadingThematic || loadingCompare || loadingGap || loadingAsk || selectedComparisonPaperIds.length < 2 || selectedComparisonPaperIds.length > 4}
+                                                        title={isViewer ? "Read-only access" : "Generate cross-paper comparison"}
                                                         type="button"
                                                     >
                                                         {loadingCompare ? (
@@ -3019,7 +3069,7 @@ function ResearchWorkspace() {
                                                                 <line x1="4" y1="4" x2="9" y2="9"></line>
                                                             </svg>
                                                         )}
-                                                        <span>Generate Comparison</span>
+                                                        <span>{isViewer ? "Generate Comparison (Read-only)" : "Generate Comparison"}</span>
                                                     </button>
                                                 </div>
                                             </>
@@ -3054,7 +3104,7 @@ function ResearchWorkspace() {
                                                                     <input
                                                                         type="checkbox"
                                                                         checked={isSelected}
-                                                                        disabled={loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk || isMaxReached}
+                                                                        disabled={isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk || isMaxReached}
                                                                         onChange={() => handleToggleGapPaper(p.id)}
                                                                     />
                                                                     <span className="compare-paper-pill-title">{p.title}</span>
@@ -3079,7 +3129,7 @@ function ResearchWorkspace() {
                                                             key={idx}
                                                             type="button"
                                                             className="prompt-shortcut-btn"
-                                                            disabled={loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk}
+                                                            disabled={isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk}
                                                             onClick={() => setGapQuestion(item.prompt)}
                                                             title={item.prompt}
                                                             aria-label={`Fill prompt: ${item.label}`}
@@ -3098,17 +3148,17 @@ function ResearchWorkspace() {
                                                 <div className="chat-input-row">
                                                     <textarea
                                                         className="chat-textarea"
-                                                        placeholder="Identify the major research gaps, limitations, unanswered questions, and future research directions across these papers..."
+                                                        placeholder={isViewer ? "Read-only access — research gap analysis is disabled for viewers." : "Identify the major research gaps, limitations, unanswered questions, and future research directions across these papers..."}
                                                         value={gapQuestion}
                                                         onChange={(e) => setGapQuestion(e.target.value)}
-                                                        disabled={loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk}
+                                                        disabled={isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk}
                                                         rows={2}
                                                     />
                                                     <button
-                                                        className="chat-send-btn gap-btn"
+                                                        className={`chat-send-btn gap-btn ${isViewer ? 'read-only-btn' : ''}`}
                                                         onClick={handleGenerateGapAnalysis}
-                                                        disabled={loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk || selectedGapPaperIds.length < 2 || selectedGapPaperIds.length > 4}
-                                                        title="Generate research gap analysis"
+                                                        disabled={isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk || selectedGapPaperIds.length < 2 || selectedGapPaperIds.length > 4}
+                                                        title={isViewer ? "Read-only access" : "Generate research gap analysis"}
                                                         type="button"
                                                     >
                                                         {loadingGap ? (
@@ -3120,7 +3170,7 @@ function ResearchWorkspace() {
                                                                 <line x1="12" y1="16" x2="12.01" y2="16"></line>
                                                             </svg>
                                                         )}
-                                                        <span>Generate Research Gap Analysis</span>
+                                                        <span>{isViewer ? "Generate Gap Analysis (Read-only)" : "Generate Research Gap Analysis"}</span>
                                                     </button>
                                                 </div>
                                             </>
@@ -3155,7 +3205,7 @@ function ResearchWorkspace() {
                                                                     <input
                                                                         type="checkbox"
                                                                         checked={isSelected}
-                                                                        disabled={loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk || isMaxReached}
+                                                                        disabled={isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk || isMaxReached}
                                                                         onChange={() => handleToggleThematicPaper(p.id)}
                                                                     />
                                                                     <span className="compare-paper-pill-title">{p.title}</span>
@@ -3178,7 +3228,7 @@ function ResearchWorkspace() {
                                                             key={idx}
                                                             type="button"
                                                             className="prompt-shortcut-btn"
-                                                            disabled={loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk}
+                                                            disabled={isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk}
                                                             onClick={() => setThematicQuestion(item.prompt)}
                                                             title={item.prompt}
                                                             aria-label={`Fill prompt: ${item.label}`}
@@ -3197,17 +3247,17 @@ function ResearchWorkspace() {
                                                 <div className="chat-input-row">
                                                     <textarea
                                                         className="chat-textarea"
-                                                        placeholder="Identify the major themes, recurring concepts, and important cross-paper patterns across these papers..."
+                                                        placeholder={isViewer ? "Read-only access — thematic analysis is disabled for viewers." : "Identify the major themes, recurring concepts, and important cross-paper patterns across these papers..."}
                                                         value={thematicQuestion}
                                                         onChange={(e) => setThematicQuestion(e.target.value)}
-                                                        disabled={loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk}
+                                                        disabled={isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk}
                                                         rows={2}
                                                     />
                                                     <button
-                                                        className="chat-send-btn thematic-btn"
+                                                        className={`chat-send-btn thematic-btn ${isViewer ? 'read-only-btn' : ''}`}
                                                         onClick={handleGenerateThematicAnalysis}
-                                                        disabled={loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk || selectedThematicPaperIds.length < 2 || selectedThematicPaperIds.length > 4}
-                                                        title="Generate cross-paper thematic analysis"
+                                                        disabled={isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk || selectedThematicPaperIds.length < 2 || selectedThematicPaperIds.length > 4}
+                                                        title={isViewer ? "Read-only access" : "Generate cross-paper thematic analysis"}
                                                         type="button"
                                                     >
                                                         {loadingThematic ? (
@@ -3217,7 +3267,7 @@ function ResearchWorkspace() {
                                                                 <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
                                                             </svg>
                                                         )}
-                                                        <span>Generate Thematic Analysis</span>
+                                                        <span>{isViewer ? "Generate Thematic Analysis (Read-only)" : "Generate Thematic Analysis"}</span>
                                                     </button>
                                                 </div>
                                             </>
@@ -3252,7 +3302,7 @@ function ResearchWorkspace() {
                                                                     <input
                                                                         type="checkbox"
                                                                         checked={isSelected}
-                                                                        disabled={loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk || isMaxReached}
+                                                                        disabled={isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk || isMaxReached}
                                                                         onChange={() => handleToggleTrendPaper(p.id)}
                                                                     />
                                                                     <span className="compare-paper-pill-title">{p.title}</span>
@@ -3276,7 +3326,7 @@ function ResearchWorkspace() {
                                                             key={idx}
                                                             type="button"
                                                             className="prompt-shortcut-btn"
-                                                            disabled={loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk}
+                                                            disabled={isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk}
                                                             onClick={() => setTrendQuestion(item.prompt)}
                                                             title={item.prompt}
                                                             aria-label={`Fill prompt: ${item.label}`}
@@ -3295,17 +3345,17 @@ function ResearchWorkspace() {
                                                 <div className="chat-input-row">
                                                     <textarea
                                                         className="chat-textarea"
-                                                        placeholder="Analyze how research has evolved across these papers, including changes in methods, approaches, research focus, emerging directions, and future research."
+                                                        placeholder={isViewer ? "Read-only access — research trend analysis is disabled for viewers." : "Analyze how research has evolved across these papers, including changes in methods, approaches, research focus, emerging directions, and future research."}
                                                         value={trendQuestion}
                                                         onChange={(e) => setTrendQuestion(e.target.value)}
-                                                        disabled={loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk}
+                                                        disabled={isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk}
                                                         rows={2}
                                                     />
                                                     <button
-                                                        className="chat-send-btn trend-btn"
+                                                        className={`chat-send-btn trend-btn ${isViewer ? 'read-only-btn' : ''}`}
                                                         onClick={handleGenerateTrendAnalysis}
-                                                        disabled={loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk || selectedTrendPaperIds.length < 2 || selectedTrendPaperIds.length > 4}
-                                                        title="Generate research trend analysis"
+                                                        disabled={isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk || selectedTrendPaperIds.length < 2 || selectedTrendPaperIds.length > 4}
+                                                        title={isViewer ? "Read-only access" : "Generate research trend analysis"}
                                                         type="button"
                                                     >
                                                         {loadingTrend ? (
@@ -3316,7 +3366,7 @@ function ResearchWorkspace() {
                                                                 <polyline points="17 6 23 6 23 12"></polyline>
                                                             </svg>
                                                         )}
-                                                        <span>Generate Trend Analysis</span>
+                                                        <span>{isViewer ? "Generate Trend Analysis (Read-only)" : "Generate Trend Analysis"}</span>
                                                     </button>
                                                 </div>
                                             </>
@@ -3330,14 +3380,16 @@ function ResearchWorkspace() {
                                             <line x1="12" y1="16" x2="12.01" y2="16"></line>
                                         </svg>
                                         <span>Add at least one paper to this research session before asking questions.</span>
-                                        <button
-                                            className="action-btn-secondary"
-                                            style={{ marginLeft: 'auto', fontSize: '0.8rem' }}
-                                            onClick={openAddPapersModal}
-                                            type="button"
-                                        >
-                                            + Add Papers
-                                        </button>
+                                        {!isViewer && (
+                                            <button
+                                                className="action-btn-secondary"
+                                                style={{ marginLeft: 'auto', fontSize: '0.8rem' }}
+                                                onClick={openAddPapersModal}
+                                                type="button"
+                                            >
+                                                + Add Papers
+                                            </button>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -3416,7 +3468,7 @@ function ResearchWorkspace() {
                             <button
                                 className="action-btn-primary"
                                 onClick={handleSaveSessionPapers}
-                                disabled={savingPapers || projectPapers.length === 0}
+                                disabled={savingPapers || projectPapers.length === 0 || isViewer}
                                 type="button"
                             >
                                 {savingPapers ? 'Saving...' : `Save Papers (${selectedModalPaperIds.length})`}

@@ -1,13 +1,16 @@
 import pymupdf as fitz
 import unicodedata
 
+from django.http import Http404
 from django.shortcuts import get_object_or_404
 
 from rest_framework import generics, permissions, status
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
 from projects.models import Project
+from projects.permissions import can_view_project, can_edit_project_content
 
 from .models import Paper
 from .serializers import PaperSerializer
@@ -19,15 +22,20 @@ from ai.services import (
 )
 
 
-def get_project_for_user(project_id, user):
+def get_project_for_user(project_id, user, require_edit=False):
     """
-    Return the project only if it belongs to the requesting user.
+    Return the project only if the user has appropriate access.
+    - If require_edit is True, user must be OWNER or EDITOR.
+    - If require_edit is False, user can be OWNER, EDITOR, or VIEWER.
+    - If user has no view access to project, raise Http404.
+    - If user has view access but lacks edit permissions, raise PermissionDenied.
     """
-    return get_object_or_404(
-        Project,
-        pk=project_id,
-        owner=user,
-    )
+    project = get_object_or_404(Project, pk=project_id)
+    if not can_view_project(user, project):
+        raise Http404("Project not found.")
+    if require_edit and not can_edit_project_content(user, project):
+        raise PermissionDenied("You do not have permission to modify papers in this project.")
+    return project
 
 
 def clean_extracted_text(text):
@@ -143,16 +151,27 @@ class PaperListCreateView(generics.ListCreateAPIView):
         project = get_project_for_user(
             self.kwargs["project_id"],
             self.request.user,
+            require_edit=False,
         )
 
         return Paper.objects.filter(
             project=project
         ).order_by("-uploaded_at")
 
+    def create(self, request, *args, **kwargs):
+        # Ensure user has edit permission before creating/uploading paper
+        get_project_for_user(
+            self.kwargs["project_id"],
+            self.request.user,
+            require_edit=True,
+        )
+        return super().create(request, *args, **kwargs)
+
     def perform_create(self, serializer):
         project = get_project_for_user(
             self.kwargs["project_id"],
             self.request.user,
+            require_edit=True,
         )
 
         paper = serializer.save(project=project)
@@ -182,9 +201,11 @@ class PaperDetailView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_object(self):
+        require_edit = self.request.method not in permissions.SAFE_METHODS
         project = get_project_for_user(
             self.kwargs["project_id"],
             self.request.user,
+            require_edit=require_edit,
         )
 
         return get_object_or_404(
@@ -205,11 +226,11 @@ def reprocess_paper(request, project_id, paper_id):
 
     The PDF file itself is not modified or deleted.
     """
+    project = get_project_for_user(project_id, request.user, require_edit=True)
     paper = get_object_or_404(
         Paper,
         pk=paper_id,
-        project_id=project_id,
-        project__owner=request.user,
+        project=project,
     )
 
     if not paper.file:
@@ -256,11 +277,11 @@ def paper_semantic_search(request, project_id, paper_id):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    project = get_project_for_user(project_id, request.user, require_edit=False)
     paper = get_object_or_404(
         Paper,
         pk=paper_id,
-        project_id=project_id,
-        project__owner=request.user,
+        project=project,
     )
 
     search_results = semantic_search(
