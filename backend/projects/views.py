@@ -1,5 +1,5 @@
 from django.contrib.auth.models import User
-from django.db import transaction
+from django.db import transaction, IntegrityError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import generics, permissions, status
@@ -8,6 +8,7 @@ from rest_framework.views import APIView
 
 from .models import Project, ProjectMember, ProjectInvitation
 from .permissions import (
+    is_project_owner,
     can_view_project,
     can_edit_project_content,
     can_manage_project,
@@ -63,7 +64,7 @@ class ProjectInviteMemberView(APIView):
     def post(self, request, project_id):
         project = get_object_or_404(Project, pk=project_id)
 
-        if project.owner != request.user:
+        if not is_project_owner(request.user, project):
             return Response(
                 {"detail": "Only the project owner can send invitations."},
                 status=status.HTTP_403_FORBIDDEN,
@@ -112,13 +113,19 @@ class ProjectInviteMemberView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        invitation = ProjectInvitation.objects.create(
-            project=project,
-            invited_user=invited_user,
-            invited_by=request.user,
-            role=role,
-            status=ProjectInvitation.STATUS_PENDING,
-        )
+        try:
+            invitation = ProjectInvitation.objects.create(
+                project=project,
+                invited_user=invited_user,
+                invited_by=request.user,
+                role=role,
+                status=ProjectInvitation.STATUS_PENDING,
+            )
+        except IntegrityError:
+            return Response(
+                {"detail": "A pending invitation already exists for this user."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         return Response(
             ProjectInvitationSerializer(invitation).data,
@@ -136,9 +143,7 @@ class ProjectMemberListView(APIView):
     def get(self, request, project_id):
         project = get_object_or_404(Project, pk=project_id)
 
-        is_owner = (project.owner == request.user)
-        is_member = ProjectMember.objects.filter(project=project, user=request.user).exists()
-        if not (is_owner or is_member):
+        if not can_view_project(request.user, project):
             return Response(
                 {"detail": "You do not have permission to view members of this project."},
                 status=status.HTTP_403_FORBIDDEN,
@@ -165,9 +170,7 @@ class ProjectMemberDetailView(APIView):
 
     def get(self, request, project_id, user_id):
         project = get_object_or_404(Project, pk=project_id)
-        is_owner = (project.owner == request.user)
-        is_member = ProjectMember.objects.filter(project=project, user=request.user).exists()
-        if not (is_owner or is_member):
+        if not can_view_project(request.user, project):
             return Response(
                 {"detail": "You do not have permission to view this project's members."},
                 status=status.HTTP_403_FORBIDDEN,
@@ -178,13 +181,13 @@ class ProjectMemberDetailView(APIView):
     def delete(self, request, project_id, user_id):
         project = get_object_or_404(Project, pk=project_id)
 
-        if project.owner != request.user:
+        if not is_project_owner(request.user, project):
             return Response(
                 {"detail": "Only the project owner can remove members."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        if user_id == project.owner.id:
+        if int(user_id) == project.owner_id:
             return Response(
                 {"detail": "Project owner cannot be removed from the project."},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -267,21 +270,24 @@ class InvitationAcceptView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, invitation_id):
-        invitation = get_object_or_404(ProjectInvitation, pk=invitation_id)
-
-        if invitation.invited_user != request.user:
-            return Response(
-                {"detail": "You do not have permission to accept this invitation."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        if invitation.status != ProjectInvitation.STATUS_PENDING:
-            return Response(
-                {"detail": "Invitation is not pending."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         with transaction.atomic():
+            invitation = get_object_or_404(
+                ProjectInvitation.objects.select_for_update().select_related("project", "invited_user"),
+                pk=invitation_id,
+            )
+
+            if invitation.invited_user != request.user:
+                return Response(
+                    {"detail": "You do not have permission to accept this invitation."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            if invitation.status != ProjectInvitation.STATUS_PENDING:
+                return Response(
+                    {"detail": "Invitation is not pending."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
             member, created = ProjectMember.objects.get_or_create(
                 project=invitation.project,
                 user=invitation.invited_user,
@@ -309,23 +315,27 @@ class InvitationDeclineView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, invitation_id):
-        invitation = get_object_or_404(ProjectInvitation, pk=invitation_id)
-
-        if invitation.invited_user != request.user:
-            return Response(
-                {"detail": "You do not have permission to decline this invitation."},
-                status=status.HTTP_403_FORBIDDEN,
+        with transaction.atomic():
+            invitation = get_object_or_404(
+                ProjectInvitation.objects.select_for_update().select_related("project", "invited_user"),
+                pk=invitation_id,
             )
 
-        if invitation.status != ProjectInvitation.STATUS_PENDING:
-            return Response(
-                {"detail": "Invitation is not pending."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            if invitation.invited_user != request.user:
+                return Response(
+                    {"detail": "You do not have permission to decline this invitation."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
 
-        invitation.status = ProjectInvitation.STATUS_DECLINED
-        invitation.responded_at = timezone.now()
-        invitation.save(update_fields=["status", "responded_at", "updated_at"])
+            if invitation.status != ProjectInvitation.STATUS_PENDING:
+                return Response(
+                    {"detail": "Invitation is not pending."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            invitation.status = ProjectInvitation.STATUS_DECLINED
+            invitation.responded_at = timezone.now()
+            invitation.save(update_fields=["status", "responded_at", "updated_at"])
 
         data = ProjectInvitationSerializer(invitation).data
         data["detail"] = "Invitation declined successfully."
@@ -341,23 +351,27 @@ class InvitationCancelView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, invitation_id):
-        invitation = get_object_or_404(ProjectInvitation, pk=invitation_id)
-
-        if invitation.project.owner != request.user:
-            return Response(
-                {"detail": "Only the project owner can cancel invitations."},
-                status=status.HTTP_403_FORBIDDEN,
+        with transaction.atomic():
+            invitation = get_object_or_404(
+                ProjectInvitation.objects.select_for_update().select_related("project__owner", "invited_user"),
+                pk=invitation_id,
             )
 
-        if invitation.status != ProjectInvitation.STATUS_PENDING:
-            return Response(
-                {"detail": "Invitation is not pending."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            if invitation.project.owner != request.user:
+                return Response(
+                    {"detail": "Only the project owner can cancel invitations."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
 
-        invitation.status = ProjectInvitation.STATUS_CANCELLED
-        invitation.responded_at = timezone.now()
-        invitation.save(update_fields=["status", "responded_at", "updated_at"])
+            if invitation.status != ProjectInvitation.STATUS_PENDING:
+                return Response(
+                    {"detail": "Invitation is not pending."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            invitation.status = ProjectInvitation.STATUS_CANCELLED
+            invitation.responded_at = timezone.now()
+            invitation.save(update_fields=["status", "responded_at", "updated_at"])
 
         data = ProjectInvitationSerializer(invitation).data
         data["detail"] = "Invitation cancelled successfully."

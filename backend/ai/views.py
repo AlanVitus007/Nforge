@@ -318,6 +318,14 @@ def compare_papers_view(request):
                         "error": "One or more papers do not belong to this research session.",
                         "code": "BAD_REQUEST"
                     }, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            first_project = ordered_papers[0].project
+            for paper in ordered_papers[1:]:
+                if paper.project_id != first_project.id:
+                    return Response({
+                        "error": "All requested papers must belong to the same project.",
+                        "code": "BAD_REQUEST"
+                    }, status=status.HTTP_400_BAD_REQUEST)
 
         # 6. Default query fallback if question is empty/missing (0 Gemini calls!)
         query_text = (
@@ -490,6 +498,14 @@ def research_gap_analysis_view(request):
                 if paper.project != session.project:
                     return Response({
                         "error": "One or more papers do not belong to this research session.",
+                        "code": "BAD_REQUEST"
+                    }, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            first_project = ordered_papers[0].project
+            for paper in ordered_papers[1:]:
+                if paper.project_id != first_project.id:
+                    return Response({
+                        "error": "All requested papers must belong to the same project.",
                         "code": "BAD_REQUEST"
                     }, status=status.HTTP_400_BAD_REQUEST)
 
@@ -673,6 +689,14 @@ def thematic_analysis_view(request):
                         "error": "One or more papers do not belong to this research session.",
                         "code": "BAD_REQUEST"
                     }, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            first_project = ordered_papers[0].project
+            for paper in ordered_papers[1:]:
+                if paper.project_id != first_project.id:
+                    return Response({
+                        "error": "All requested papers must belong to the same project.",
+                        "code": "BAD_REQUEST"
+                    }, status=status.HTTP_400_BAD_REQUEST)
 
         # 6. Default question fallback if question is empty/missing
         DEFAULT_THEMATIC_QUESTION = (
@@ -848,6 +872,14 @@ def research_trends_view(request):
                         "error": "One or more papers do not belong to this research session.",
                         "code": "BAD_REQUEST"
                     }, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            first_project = ordered_papers[0].project
+            for paper in ordered_papers[1:]:
+                if paper.project_id != first_project.id:
+                    return Response({
+                        "error": "All requested papers must belong to the same project.",
+                        "code": "BAD_REQUEST"
+                    }, status=status.HTTP_400_BAD_REQUEST)
 
         # 6. Default question fallback if question is empty/missing
         DEFAULT_TREND_QUESTION = (
@@ -990,10 +1022,38 @@ def session_list_create_view(request):
             elif isinstance(title, str):
                 title = title.strip()
 
+            papers_data = request.data.get("papers")
+            session_papers = []
+            if papers_data is not None:
+                if not isinstance(papers_data, list):
+                    return Response({
+                        "error": "papers must be a list of paper IDs.",
+                        "code": "BAD_REQUEST"
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+                valid_ids = []
+                for pid in papers_data:
+                    try:
+                        valid_ids.append(int(pid))
+                    except (ValueError, TypeError):
+                        return Response({
+                            "error": "All paper IDs must be integers.",
+                            "code": "BAD_REQUEST"
+                        }, status=status.HTTP_400_BAD_REQUEST)
+
+                session_papers = list(Paper.objects.filter(id__in=valid_ids, project=project))
+                if len(session_papers) != len(set(valid_ids)):
+                    return Response({
+                        "error": "One or more paper IDs are invalid or do not belong to this project.",
+                        "code": "BAD_REQUEST"
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
             session = ResearchSession.objects.create(
                 project=project,
                 title=title,
             )
+            if session_papers:
+                session.papers.set(session_papers)
 
             serializer = ResearchSessionListSerializer(session)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -1049,6 +1109,22 @@ def session_detail_view(request, session_id):
                 "error": "Access denied.",
                 "code": "FORBIDDEN"
             }, status=status.HTTP_403_FORBIDDEN)
+
+        supplied_project_id = request.query_params.get("project_id") or (
+            request.data.get("project_id") if isinstance(request.data, dict) else None
+        )
+        if supplied_project_id is not None:
+            try:
+                if int(supplied_project_id) != session.project_id:
+                    return Response({
+                        "error": "Research session does not belong to the specified project.",
+                        "code": "BAD_REQUEST"
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            except (ValueError, TypeError):
+                return Response({
+                    "error": "Invalid project_id.",
+                    "code": "BAD_REQUEST"
+                }, status=status.HTTP_400_BAD_REQUEST)
 
         if request.method == "GET":
             serializer = ResearchSessionDetailSerializer(session)
