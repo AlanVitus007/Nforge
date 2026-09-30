@@ -363,6 +363,132 @@ const THEMATIC_SHORTCUTS = [
 
 const DEFAULT_THEMATIC_QUESTION = 'Identify the major themes, recurring concepts, and important cross-paper patterns across these papers.';
 
+/**
+ * Helper to safely parse and detect structured cross-paper research trend analysis JSON.
+ * Accepts both parsed object and JSON string, and enriches evidence paper titles.
+ */
+function parseStructuredTrendAnalysis(content, papers = []) {
+    let parsed = null;
+
+    if (content && typeof content === 'object') {
+        parsed = content;
+    } else if (typeof content === 'string') {
+        const trimmed = content.trim();
+        if (trimmed.startsWith('{') || trimmed.startsWith('```')) {
+            let jsonStr = trimmed;
+            if (jsonStr.startsWith('```')) {
+                jsonStr = jsonStr.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+            }
+            try {
+                parsed = JSON.parse(jsonStr);
+            } catch {
+                return null;
+            }
+        }
+    }
+
+    if (
+        parsed &&
+        typeof parsed === 'object' &&
+        (parsed.overall_trend ||
+         Array.isArray(parsed.research_evolution) ||
+         Array.isArray(parsed.emerging_directions) ||
+         Array.isArray(parsed.methodology_evolution) ||
+         Array.isArray(parsed.future_directions))
+    ) {
+        if (papers && papers.length > 0) {
+            const paperMap = {};
+            papers.forEach((p) => {
+                paperMap[p.id] = p.title;
+            });
+
+            // 1. research_evolution
+            if (Array.isArray(parsed.research_evolution)) {
+                parsed.research_evolution.forEach((ev) => {
+                    if (ev && Array.isArray(ev.papers)) {
+                        ev.papers.forEach((pEntry) => {
+                            if (pEntry) {
+                                const pTitle = pEntry.paper_title || paperMap[pEntry.paper_id];
+                                if (pTitle && !pEntry.paper_title) {
+                                    pEntry.paper_title = pTitle;
+                                }
+                                if (Array.isArray(pEntry.sources)) {
+                                    pEntry.sources.forEach((src) => {
+                                        if (src) {
+                                            if (!src.paper_id && pEntry.paper_id) {
+                                                src.paper_id = pEntry.paper_id;
+                                            }
+                                            if (!src.paper_title && (src.paper_id && paperMap[src.paper_id])) {
+                                                src.paper_title = paperMap[src.paper_id];
+                                            } else if (!src.paper_title && pTitle) {
+                                                src.paper_title = pTitle;
+                                            }
+                                        }
+                                    });
+                                }
+                            }
+                        });
+                    }
+                });
+            }
+
+            // 2. other sections: emerging_directions, methodology_evolution, future_directions
+            const otherSections = [
+                parsed.emerging_directions,
+                parsed.methodology_evolution,
+                parsed.future_directions
+            ];
+            otherSections.forEach((sectionList) => {
+                if (Array.isArray(sectionList)) {
+                    sectionList.forEach((item) => {
+                        if (item && Array.isArray(item.sources)) {
+                            item.sources.forEach((src) => {
+                                if (src && !src.paper_title && src.paper_id && paperMap[src.paper_id]) {
+                                    src.paper_title = paperMap[src.paper_id];
+                                }
+                            });
+                        }
+                    });
+                }
+            });
+        }
+        return parsed;
+    }
+    return null;
+}
+
+/**
+ * Research prompt shortcuts for Cross-Paper Research Trend Analysis.
+ */
+const TREND_SHORTCUTS = [
+    {
+        label: 'Analyze research evolution',
+        prompt: 'Analyze how the research problem, techniques, and core focus have evolved across these papers.'
+    },
+    {
+        label: 'Compare methodologies over the papers',
+        prompt: 'Compare how methodologies, experimental approaches, and technical frameworks evolve across these papers.'
+    },
+    {
+        label: 'Identify emerging research directions',
+        prompt: 'Identify emerging research directions, newly explored paradigms, and novel topics across these papers.'
+    },
+    {
+        label: 'Find changes in research focus',
+        prompt: 'Identify shifts and changes in research focus, assumptions, and priorities across these papers.'
+    },
+    {
+        label: 'Analyze methodological trends',
+        prompt: 'Analyze key methodological trends, procedural shifts, and evaluation strategies across these papers.'
+    },
+    {
+        label: 'Suggest future research directions',
+        prompt: 'Suggest concrete, grounded future research directions based on the evolutionary trajectory of these papers.'
+    }
+];
+
+const DEFAULT_TREND_QUESTION = 'Analyze how research has evolved across these papers, including changes in methods, approaches, research focus, emerging directions, and future research.';
+
 function ResearchWorkspace() {
     const { projectId } = useParams();
     const navigate = useNavigate();
@@ -406,6 +532,12 @@ function ResearchWorkspace() {
     const [thematicQuestion, setThematicQuestion] = useState('');
     const [loadingThematic, setLoadingThematic] = useState(false);
     const [thematicError, setThematicError] = useState('');
+
+    // Live Multi-Paper Research Trend Analysis State
+    const [selectedTrendPaperIds, setSelectedTrendPaperIds] = useState([]);
+    const [trendQuestion, setTrendQuestion] = useState('');
+    const [loadingTrend, setLoadingTrend] = useState(false);
+    const [trendError, setTrendError] = useState('');
 
     // Loading & Action states
     const [loadingList, setLoadingList] = useState(true);

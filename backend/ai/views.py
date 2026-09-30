@@ -23,6 +23,7 @@ from .services import (
     generate_multi_paper_synthesis,
     generate_research_gap_analysis,
     generate_thematic_analysis,
+    generate_research_trend_analysis,
     RateLimitError,
 )
 
@@ -725,6 +726,202 @@ def thematic_analysis_view(request):
                 papers=ordered_papers,
             )
             return Response(thematic_response, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return handle_ai_exception(e)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def research_trends_view(request):
+    """
+    POST /api/ai/research-trends/
+    Performs cross-paper research trend and evolution analysis over 2-4 selected papers.
+    Validates paper existence, project ownership, optional session project alignment,
+    and invokes generate_research_trend_analysis().
+    If session_id is provided, persists USER and ASSISTANT messages and deduplicated
+    evidence inside an atomic transaction.
+    """
+    try:
+        paper_ids = request.data.get("paper_ids")
+        question = request.data.get("question")
+        session_id = request.data.get("session_id")
+
+        # 1. Validate paper_ids existence & type
+        if paper_ids is None or not isinstance(paper_ids, list):
+            return Response({
+                "error": "paper_ids must be a list.",
+                "code": "BAD_REQUEST"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # 2. Validate paper count (min 2, max 4)
+        if len(paper_ids) < 2 or len(paper_ids) > 4:
+            return Response({
+                "error": "Research trend analysis requires between 2 and 4 papers.",
+                "code": "BAD_REQUEST"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # 3. Validate paper_ids integers & duplicates
+        for pid in paper_ids:
+            if not isinstance(pid, int) or isinstance(pid, bool):
+                return Response({
+                    "error": "All paper_ids must be integers.",
+                    "code": "BAD_REQUEST"
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        if len(paper_ids) != len(set(paper_ids)):
+            return Response({
+                "error": "Duplicate paper IDs are not allowed.",
+                "code": "BAD_REQUEST"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # 4. Verify paper existence & user access while preserving requested order
+        ordered_papers = []
+        for pid in paper_ids:
+            try:
+                paper = Paper.objects.get(id=pid)
+            except Paper.DoesNotExist:
+                return Response({
+                    "error": "One or more requested papers were not found.",
+                    "code": "NOT_FOUND"
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            if paper.project.owner != request.user:
+                return Response({
+                    "error": "Access denied for one or more requested papers.",
+                    "code": "FORBIDDEN"
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            ordered_papers.append(paper)
+
+        # 5. Session validation (optional session_id)
+        session = None
+        if session_id is not None:
+            try:
+                session = ResearchSession.objects.get(id=session_id)
+            except (ResearchSession.DoesNotExist, ValueError, TypeError):
+                return Response({
+                    "error": "Research session not found.",
+                    "code": "NOT_FOUND"
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            if session.project.owner != request.user:
+                return Response({
+                    "error": "Access denied.",
+                    "code": "FORBIDDEN"
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            for paper in ordered_papers:
+                if paper.project != session.project:
+                    return Response({
+                        "error": "One or more papers do not belong to this research session.",
+                        "code": "BAD_REQUEST"
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+        # 6. Default question fallback if question is empty/missing
+        DEFAULT_TREND_QUESTION = (
+            "Analyze how research has evolved across these papers, including changes in methods, "
+            "approaches, research focus, emerging directions, and future research."
+        )
+        effective_question = (
+            question.strip()
+            if (question and isinstance(question, str) and question.strip())
+            else DEFAULT_TREND_QUESTION
+        )
+
+        # 7. Execute single-call Research Trend Analysis service and persist if session provided
+        if session:
+            with transaction.atomic():
+                user_msg = ResearchMessage.objects.create(
+                    session=session,
+                    role=ResearchMessage.ROLE_USER,
+                    content=effective_question,
+                )
+
+                trend_response = generate_research_trend_analysis(
+                    question=effective_question,
+                    papers=ordered_papers,
+                )
+
+                trend_data = trend_response.get("trend_analysis", {})
+                assistant_msg = ResearchMessage.objects.create(
+                    session=session,
+                    role=ResearchMessage.ROLE_ASSISTANT,
+                    content=json.dumps(trend_data),
+                )
+
+                # Collect all validated sources across all sections without duplication
+                unique_sources = []
+                seen_keys = set()
+
+                # 1. research_evolution
+                evolution_items = trend_data.get("research_evolution", [])
+                if isinstance(evolution_items, list):
+                    for ev_item in evolution_items:
+                        if isinstance(ev_item, dict):
+                            papers_in_ev = ev_item.get("papers", [])
+                            if isinstance(papers_in_ev, list):
+                                for p_entry in papers_in_ev:
+                                    if isinstance(p_entry, dict):
+                                        for src in p_entry.get("sources", []):
+                                            if isinstance(src, dict):
+                                                cid = src.get("chunk_id")
+                                                pid = src.get("paper_id")
+                                                dedup_key = (pid, cid) if cid is not None else (pid, src.get("page_number"), src.get("text"))
+                                                if dedup_key not in seen_keys:
+                                                    seen_keys.add(dedup_key)
+                                                    unique_sources.append(src)
+
+                # 2. emerging_directions, methodology_evolution, future_directions
+                other_sections = [
+                    trend_data.get("emerging_directions", []),
+                    trend_data.get("methodology_evolution", []),
+                    trend_data.get("future_directions", []),
+                ]
+                for section in other_sections:
+                    if isinstance(section, list):
+                        for item in section:
+                            if isinstance(item, dict):
+                                for src in item.get("sources", []):
+                                    if isinstance(src, dict):
+                                        cid = src.get("chunk_id")
+                                        pid = src.get("paper_id")
+                                        dedup_key = (pid, cid) if cid is not None else (pid, src.get("page_number"), src.get("text"))
+                                        if dedup_key not in seen_keys:
+                                            seen_keys.add(dedup_key)
+                                            unique_sources.append(src)
+
+                paper_map = {p.id: p for p in ordered_papers}
+                chunk_ids = [s.get("chunk_id") for s in unique_sources if s.get("chunk_id")]
+                chunks_by_id = {c.id: c for c in PaperChunk.objects.filter(id__in=chunk_ids)} if chunk_ids else {}
+
+                for src in unique_sources:
+                    paper_id = src.get("paper_id")
+                    paper_obj = paper_map.get(paper_id)
+                    if not paper_obj and paper_id:
+                        paper_obj = Paper.objects.filter(id=paper_id).first()
+                    if not paper_obj:
+                        continue
+
+                    chunk_obj = chunks_by_id.get(src.get("chunk_id"))
+
+                    ResearchEvidence.objects.create(
+                        message=assistant_msg,
+                        paper=paper_obj,
+                        chunk=chunk_obj,
+                        page_number=src.get("page_number"),
+                        text=src.get("text") or "",
+                    )
+
+                session.save()
+                trend_response["session_id"] = session.id
+                return Response(trend_response, status=status.HTTP_200_OK)
+        else:
+            trend_response = generate_research_trend_analysis(
+                question=effective_question,
+                papers=ordered_papers,
+            )
+            return Response(trend_response, status=status.HTTP_200_OK)
 
     except Exception as e:
         return handle_ai_exception(e)

@@ -4021,6 +4021,490 @@ class ResearchTrendAnalysisServiceTest(TestCase):
             self.assertIn("across the selected papers", prompt_text)
 
 
+class ResearchTrendAnalysisAPITests(TestCase):
+    """
+    Focused API tests for Phase 7.3.2: Research Trend Analysis REST API endpoint
+    POST /api/ai/research-trends/
+    Verifies authentication, paper bounds, duplicates, ownership, cross-project checks,
+    optional session validation, standalone non-persistence, session persistence,
+    evidence deduplication, atomic rollback, and error handling.
+    """
+
+    def setUp(self):
+        from rest_framework.test import APIClient
+        self.client = APIClient()
+
+        self.user1 = User.objects.create_user(username="trend_api_user1", password="password")
+        self.user2 = User.objects.create_user(username="trend_api_user2", password="password")
+
+        self.proj1 = Project.objects.create(owner=self.user1, title="User1 Project")
+        self.proj2 = Project.objects.create(owner=self.user2, title="User2 Project")
+
+        self.paper1 = Paper.objects.create(project=self.proj1, title="Paper Alpha")
+        self.paper2 = Paper.objects.create(project=self.proj1, title="Paper Beta")
+        self.paper3 = Paper.objects.create(project=self.proj1, title="Paper Gamma")
+        self.paper4 = Paper.objects.create(project=self.proj1, title="Paper Delta")
+        self.paper5 = Paper.objects.create(project=self.proj1, title="Paper Epsilon")
+
+        self.other_paper = Paper.objects.create(project=self.proj2, title="Other User Paper")
+
+        self.session1 = ResearchSession.objects.create(project=self.proj1, title="Trend Session 1")
+        self.session2 = ResearchSession.objects.create(project=self.proj2, title="Trend Session 2")
+
+        self.chunk1 = PaperChunk.objects.create(
+            paper=self.paper1,
+            chunk_index=0,
+            page_number=3,
+            text="Paper Alpha chunk text",
+            embedding=[0.1] * 384
+        )
+        self.chunk2 = PaperChunk.objects.create(
+            paper=self.paper2,
+            chunk_index=0,
+            page_number=7,
+            text="Paper Beta chunk text",
+            embedding=[0.2] * 384
+        )
+
+        self.mock_trend_response = {
+            "question": "How has research evolved across these papers?",
+            "papers": [
+                {"paper_id": self.paper1.id, "title": self.paper1.title},
+                {"paper_id": self.paper2.id, "title": self.paper2.title}
+            ],
+            "trend_analysis": {
+                "overall_trend": "Research shifts from recurrent models to scalable self-attention.",
+                "research_evolution": [
+                    {
+                        "trend": "Sequence Architecture",
+                        "description": "Transition towards self-attention.",
+                        "papers": [
+                            {
+                                "paper_id": self.paper1.id,
+                                "paper_title": self.paper1.title,
+                                "observation": "Paper Alpha uses recurrent mechanisms.",
+                                "sources": [
+                                    {
+                                        "paper_id": self.paper1.id,
+                                        "chunk_id": self.chunk1.id,
+                                        "page_number": 3,
+                                        "text": "Paper Alpha chunk text"
+                                    }
+                                ]
+                            }
+                        ],
+                        "evolution_observation": "Alpha establishes recurrent baseline."
+                    }
+                ],
+                "emerging_directions": [
+                    {
+                        "direction": "Sparse Sequence Computation",
+                        "description": "Exploration of sparse patterns.",
+                        "sources": [
+                            {
+                                "paper_id": self.paper2.id,
+                                "chunk_id": self.chunk2.id,
+                                "page_number": 7,
+                                "text": "Paper Beta chunk text"
+                            }
+                        ]
+                    }
+                ],
+                "methodology_evolution": [
+                    {
+                        "aspect": "Sequence Processing Paradigm",
+                        "description": "Evolution from recurrent to attention layers.",
+                        "sources": [
+                            {
+                                "paper_id": self.paper1.id,
+                                "chunk_id": self.chunk1.id,
+                                "page_number": 3,
+                                "text": "Paper Alpha chunk text"
+                            }
+                        ]
+                    }
+                ],
+                "future_directions": [
+                    {
+                        "direction": "Linear-time Attention",
+                        "description": "Investigating sub-quadratic variants.",
+                        "sources": [
+                            {
+                                "paper_id": self.paper2.id,
+                                "chunk_id": self.chunk2.id,
+                                "page_number": 7,
+                                "text": "Paper Beta chunk text"
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+
+    def test_authenticated_successful_request(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+
+        with patch("ai.views.generate_research_trend_analysis", return_value=self.mock_trend_response) as mock_service:
+            resp = self.client.post("/api/ai/research-trends/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+                "question": "How has research evolved across these papers?"
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            self.assertEqual(len(data["papers"]), 2)
+            self.assertIn("trend_analysis", data)
+            self.assertEqual(data["trend_analysis"]["overall_trend"], "Research shifts from recurrent models to scalable self-attention.")
+            self.assertEqual(mock_service.call_count, 1)
+
+    def test_unauthenticated_request_returns_401(self):
+        resp = self.client.post("/api/ai/research-trends/", {
+            "paper_ids": [self.paper1.id, self.paper2.id]
+        }, format="json")
+        self.assertEqual(resp.status_code, 401)
+
+    def test_2_paper_request(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+
+        with patch("ai.views.generate_research_trend_analysis", return_value=self.mock_trend_response):
+            resp = self.client.post("/api/ai/research-trends/", {
+                "paper_ids": [self.paper1.id, self.paper2.id]
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(len(resp.json()["papers"]), 2)
+
+    def test_4_paper_request(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+
+        four_paper_resp = {
+            "question": "Trends",
+            "papers": [
+                {"paper_id": self.paper1.id, "title": self.paper1.title},
+                {"paper_id": self.paper2.id, "title": self.paper2.title},
+                {"paper_id": self.paper3.id, "title": self.paper3.title},
+                {"paper_id": self.paper4.id, "title": self.paper4.title},
+            ],
+            "trend_analysis": {
+                "overall_trend": "Four papers evaluated.",
+                "research_evolution": [],
+                "emerging_directions": [],
+                "methodology_evolution": [],
+                "future_directions": []
+            }
+        }
+
+        with patch("ai.views.generate_research_trend_analysis", return_value=four_paper_resp):
+            resp = self.client.post("/api/ai/research-trends/", {
+                "paper_ids": [self.paper1.id, self.paper2.id, self.paper3.id, self.paper4.id]
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(len(resp.json()["papers"]), 4)
+
+    def test_fewer_than_2_papers_returns_400(self):
+        self.client.force_authenticate(user=self.user1)
+
+        resp_empty = self.client.post("/api/ai/research-trends/", {"paper_ids": []}, format="json")
+        self.assertEqual(resp_empty.status_code, 400)
+
+        resp_single = self.client.post("/api/ai/research-trends/", {"paper_ids": [self.paper1.id]}, format="json")
+        self.assertEqual(resp_single.status_code, 400)
+        self.assertIn("requires between 2 and 4 papers", resp_single.json()["error"])
+
+    def test_more_than_4_papers_returns_400(self):
+        self.client.force_authenticate(user=self.user1)
+
+        resp = self.client.post("/api/ai/research-trends/", {
+            "paper_ids": [self.paper1.id, self.paper2.id, self.paper3.id, self.paper4.id, self.paper5.id]
+        }, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("requires between 2 and 4 papers", resp.json()["error"])
+
+    def test_duplicate_paper_ids_returns_400(self):
+        self.client.force_authenticate(user=self.user1)
+
+        resp = self.client.post("/api/ai/research-trends/", {
+            "paper_ids": [self.paper1.id, self.paper1.id]
+        }, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("Duplicate paper IDs", resp.json()["error"])
+
+    def test_invalid_or_non_integer_paper_ids_returns_400(self):
+        self.client.force_authenticate(user=self.user1)
+
+        resp_missing = self.client.post("/api/ai/research-trends/", {}, format="json")
+        self.assertEqual(resp_missing.status_code, 400)
+        self.assertEqual(resp_missing.json()["code"], "BAD_REQUEST")
+
+        resp_str = self.client.post("/api/ai/research-trends/", {"paper_ids": "not-a-list"}, format="json")
+        self.assertEqual(resp_str.status_code, 400)
+
+        resp_elem_str = self.client.post("/api/ai/research-trends/", {"paper_ids": [self.paper1.id, "string_id"]}, format="json")
+        self.assertEqual(resp_elem_str.status_code, 400)
+
+        resp_elem_bool = self.client.post("/api/ai/research-trends/", {"paper_ids": [self.paper1.id, True]}, format="json")
+        self.assertEqual(resp_elem_bool.status_code, 400)
+
+    def test_nonexistent_paper_id_returns_404(self):
+        self.client.force_authenticate(user=self.user1)
+
+        resp = self.client.post("/api/ai/research-trends/", {
+            "paper_ids": [self.paper1.id, 999999]
+        }, format="json")
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.json()["code"], "NOT_FOUND")
+
+    def test_unauthorized_paper_returns_403(self):
+        self.client.force_authenticate(user=self.user1)
+
+        resp = self.client.post("/api/ai/research-trends/", {
+            "paper_ids": [self.paper1.id, self.other_paper.id]
+        }, format="json")
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()["code"], "FORBIDDEN")
+
+    def test_default_question_fallback(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+
+        expected_default = (
+            "Analyze how research has evolved across these papers, including changes in methods, "
+            "approaches, research focus, emerging directions, and future research."
+        )
+
+        with patch("ai.views.generate_research_trend_analysis", return_value=self.mock_trend_response) as mock_service:
+            resp = self.client.post("/api/ai/research-trends/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+                "question": "   "
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            mock_service.assert_called_once()
+            called_question = mock_service.call_args.kwargs["question"]
+            self.assertEqual(called_question, expected_default)
+
+    def test_custom_question_passed_to_service(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+
+        custom_q = "How has methodology evolved from Paper Alpha to Paper Beta?"
+
+        with patch("ai.views.generate_research_trend_analysis", return_value=self.mock_trend_response) as mock_service:
+            resp = self.client.post("/api/ai/research-trends/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+                "question": custom_q
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            mock_service.assert_called_once()
+            called_question = mock_service.call_args.kwargs["question"]
+            self.assertEqual(called_question, custom_q)
+
+    def test_standalone_request_does_not_persist_messages_or_evidence(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+        from ai.models import ResearchMessage, ResearchEvidence
+
+        initial_msg_count = ResearchMessage.objects.count()
+        initial_ev_count = ResearchEvidence.objects.count()
+
+        with patch("ai.views.generate_research_trend_analysis", return_value=self.mock_trend_response):
+            resp = self.client.post("/api/ai/research-trends/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            self.assertNotIn("session_id", resp.json())
+            self.assertEqual(ResearchMessage.objects.count(), initial_msg_count)
+            self.assertEqual(ResearchEvidence.objects.count(), initial_ev_count)
+
+    def test_valid_session_persistence(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+        from ai.models import ResearchMessage
+        import json
+
+        initial_msg_count = ResearchMessage.objects.filter(session=self.session1).count()
+
+        with patch("ai.views.generate_research_trend_analysis", return_value=self.mock_trend_response):
+            resp = self.client.post("/api/ai/research-trends/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+                "question": "How has research evolved across these papers?",
+                "session_id": self.session1.id
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(resp.json()["session_id"], self.session1.id)
+            self.assertEqual(ResearchMessage.objects.filter(session=self.session1).count(), initial_msg_count + 2)
+
+            user_msg = ResearchMessage.objects.filter(session=self.session1, role=ResearchMessage.ROLE_USER).last()
+            self.assertEqual(user_msg.content, "How has research evolved across these papers?")
+
+            asst_msg = ResearchMessage.objects.filter(session=self.session1, role=ResearchMessage.ROLE_ASSISTANT).last()
+            parsed_content = json.loads(asst_msg.content)
+            self.assertEqual(parsed_content["overall_trend"], "Research shifts from recurrent models to scalable self-attention.")
+
+    def test_session_ownership_protection(self):
+        self.client.force_authenticate(user=self.user1)
+
+        resp = self.client.post("/api/ai/research-trends/", {
+            "paper_ids": [self.paper1.id, self.paper2.id],
+            "session_id": self.session2.id
+        }, format="json")
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json()["code"], "FORBIDDEN")
+
+    def test_cross_project_paper_and_session_rejection(self):
+        self.client.force_authenticate(user=self.user1)
+
+        proj1_b = Project.objects.create(owner=self.user1, title="User1 Project B")
+        paper_1b = Paper.objects.create(project=proj1_b, title="Project B Paper")
+
+        resp = self.client.post("/api/ai/research-trends/", {
+            "paper_ids": [self.paper1.id, paper_1b.id],
+            "session_id": self.session1.id
+        }, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("do not belong to this research session", resp.json()["error"])
+
+    def test_nonexistent_or_invalid_session_id_returns_404(self):
+        self.client.force_authenticate(user=self.user1)
+
+        resp_nonexistent = self.client.post("/api/ai/research-trends/", {
+            "paper_ids": [self.paper1.id, self.paper2.id],
+            "session_id": 999999
+        }, format="json")
+        self.assertEqual(resp_nonexistent.status_code, 404)
+        self.assertEqual(resp_nonexistent.json()["code"], "NOT_FOUND")
+
+        resp_invalid_str = self.client.post("/api/ai/research-trends/", {
+            "paper_ids": [self.paper1.id, self.paper2.id],
+            "session_id": "not-an-id"
+        }, format="json")
+        self.assertEqual(resp_invalid_str.status_code, 404)
+
+    def test_research_evidence_saved_and_deduplicated(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+        from ai.models import ResearchEvidence, ResearchMessage
+
+        source_p1 = {
+            "chunk_id": self.chunk1.id,
+            "paper_id": self.paper1.id,
+            "page_number": 3,
+            "text": "Paper Alpha chunk text",
+        }
+        source_p2 = {
+            "chunk_id": self.chunk2.id,
+            "paper_id": self.paper2.id,
+            "page_number": 7,
+            "text": "Paper Beta chunk text",
+        }
+
+        mock_trend = {
+            "question": "Trend question",
+            "papers": [
+                {"paper_id": self.paper1.id, "title": self.paper1.title},
+                {"paper_id": self.paper2.id, "title": self.paper2.title}
+            ],
+            "trend_analysis": {
+                "overall_trend": "Synthesis across trends.",
+                "research_evolution": [
+                    {
+                        "trend": "Trend 1",
+                        "description": "Desc 1",
+                        "papers": [
+                            {"paper_id": self.paper1.id, "paper_title": self.paper1.title, "observation": "Obs 1", "sources": [source_p1]}
+                        ],
+                        "evolution_observation": "Obs 1"
+                    }
+                ],
+                "emerging_directions": [
+                    {
+                        "direction": "Emerging 1",
+                        "description": "Desc emerging",
+                        "sources": [source_p2]
+                    }
+                ],
+                "methodology_evolution": [
+                    {
+                        "aspect": "Aspect 1",
+                        "description": "Desc aspect",
+                        # Duplicate source_p1 referenced here as well
+                        "sources": [source_p1]
+                    }
+                ],
+                "future_directions": [
+                    {
+                        "direction": "Future 1",
+                        "description": "Desc future",
+                        # Duplicate source_p2 referenced here as well
+                        "sources": [source_p2]
+                    }
+                ]
+            }
+        }
+
+        with patch("ai.views.generate_research_trend_analysis", return_value=mock_trend):
+            resp = self.client.post("/api/ai/research-trends/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+                "session_id": self.session1.id
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+
+            asst_msg = ResearchMessage.objects.filter(session=self.session1, role=ResearchMessage.ROLE_ASSISTANT).last()
+            evidence_records = ResearchEvidence.objects.filter(message=asst_msg)
+
+            # Exactly 2 unique evidence records should be created (source_p1 and source_p2 deduplicated across sections)
+            self.assertEqual(evidence_records.count(), 2)
+
+            evidence_chunk_ids = set(evidence_records.values_list("chunk_id", flat=True))
+            self.assertIn(self.chunk1.id, evidence_chunk_ids)
+            self.assertIn(self.chunk2.id, evidence_chunk_ids)
+
+            ev_p1 = evidence_records.get(chunk=self.chunk1)
+            self.assertEqual(ev_p1.paper, self.paper1)
+            self.assertEqual(ev_p1.page_number, 3)
+            self.assertEqual(ev_p1.text, "Paper Alpha chunk text")
+
+    def test_transaction_rollback_on_synthesis_failure(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+        from ai.models import ResearchMessage, ResearchEvidence
+
+        initial_msg_count = ResearchMessage.objects.filter(session=self.session1).count()
+        initial_ev_count = ResearchEvidence.objects.count()
+
+        with patch("ai.views.generate_research_trend_analysis", side_effect=Exception("Trend model failed")):
+            resp = self.client.post("/api/ai/research-trends/", {
+                "paper_ids": [self.paper1.id, self.paper2.id],
+                "session_id": self.session1.id
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 500)
+            # Transaction must have rolled back - 0 new messages or evidence
+            self.assertEqual(ResearchMessage.objects.filter(session=self.session1).count(), initial_msg_count)
+            self.assertEqual(ResearchEvidence.objects.count(), initial_ev_count)
+
+    def test_exactly_one_service_invocation(self):
+        self.client.force_authenticate(user=self.user1)
+        from unittest.mock import patch
+
+        with patch("ai.views.generate_research_trend_analysis", return_value=self.mock_trend_response) as mock_service:
+            resp = self.client.post("/api/ai/research-trends/", {
+                "paper_ids": [self.paper1.id, self.paper2.id]
+            }, format="json")
+
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(mock_service.call_count, 1)
+
+
+
 
 
 
