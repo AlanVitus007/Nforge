@@ -590,6 +590,8 @@ function ResearchWorkspace() {
             setGapQuestion('');
             setThematicError('');
             setThematicQuestion('');
+            setTrendError('');
+            setTrendQuestion('');
             setChatMode('ask');
 
             const res = await api.get(`/ai/sessions/${sessionId}/`);
@@ -607,11 +609,13 @@ function ResearchWorkspace() {
                 setSelectedComparisonPaperIds(compPaperIds);
                 setSelectedGapPaperIds(compPaperIds);
                 setSelectedThematicPaperIds(compPaperIds);
+                setSelectedTrendPaperIds(compPaperIds);
             } else {
                 setSelectedPaperId('');
                 setSelectedComparisonPaperIds([]);
                 setSelectedGapPaperIds([]);
                 setSelectedThematicPaperIds([]);
+                setSelectedTrendPaperIds([]);
             }
         } catch (err) {
             if (currentSelectIdRef.current !== sessionId) return;
@@ -714,14 +718,17 @@ function ResearchWorkspace() {
             setSelectedComparisonPaperIds([]);
             setSelectedGapPaperIds([]);
             setSelectedThematicPaperIds([]);
+            setSelectedTrendPaperIds([]);
             setQuestionText('');
             setComparisonQuestion('');
             setGapQuestion('');
             setThematicQuestion('');
+            setTrendQuestion('');
             setAskError('');
             setCompareError('');
             setGapError('');
             setThematicError('');
+            setTrendError('');
             setChatMode('ask');
         } catch (err) {
             setActionError(err.response?.data?.error || 'Failed to create research session.');
@@ -884,9 +891,18 @@ function ResearchWorkspace() {
                 return validIds.slice(0, 4);
             });
 
+            // Keep trend selection in sync with updated papers
+            setSelectedTrendPaperIds((prev) => {
+                const validIds = prev.filter((id) => selectedModalPaperIds.includes(id));
+                if (validIds.length < 2 && selectedModalPaperIds.length >= 2) {
+                    return selectedModalPaperIds.slice(0, 4);
+                }
+                return validIds.slice(0, 4);
+            });
+
             // If papers fall below 2, revert chatMode to 'ask'
             if ((updated.papers?.length || 0) < 2) {
-                if (chatMode === 'compare' || chatMode === 'gap' || chatMode === 'thematic') {
+                if (chatMode === 'compare' || chatMode === 'gap' || chatMode === 'thematic' || chatMode === 'trends') {
                     setChatMode('ask');
                 }
             }
@@ -929,9 +945,10 @@ function ResearchWorkspace() {
             setSelectedComparisonPaperIds((prev) => prev.filter((id) => id !== paperIdToRemove));
             setSelectedGapPaperIds((prev) => prev.filter((id) => id !== paperIdToRemove));
             setSelectedThematicPaperIds((prev) => prev.filter((id) => id !== paperIdToRemove));
+            setSelectedTrendPaperIds((prev) => prev.filter((id) => id !== paperIdToRemove));
 
             if ((updated.papers?.length || 0) < 2) {
-                if (chatMode === 'compare' || chatMode === 'gap' || chatMode === 'thematic') {
+                if (chatMode === 'compare' || chatMode === 'gap' || chatMode === 'thematic' || chatMode === 'trends') {
                     setChatMode('ask');
                 }
             }
@@ -985,9 +1002,22 @@ function ResearchWorkspace() {
         });
     };
 
+    // Toggle Paper Selection for Research Trend Analysis (enforce min 2, max 4)
+    const handleToggleTrendPaper = (paperId) => {
+        setSelectedTrendPaperIds((prev) => {
+            if (prev.includes(paperId)) {
+                return prev.filter((id) => id !== paperId);
+            }
+            if (prev.length >= 4) {
+                return prev; // Maximum 4 papers strictly enforced
+            }
+            return [...prev, paperId];
+        });
+    };
+
     // Send Single-Paper Research Question via POST /api/ai/ask/
     const handleSendQuestion = async () => {
-        if (loadingAsk || loadingCompare || loadingGap || loadingThematic) return;
+        if (loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend) return;
         const trimmed = questionText.trim();
         if (!trimmed) return;
         if (!selectedPaperId || !activeSessionId) return;
@@ -1084,7 +1114,7 @@ function ResearchWorkspace() {
 
     // Send Multi-Paper Comparison via POST /api/ai/compare/
     const handleGenerateComparison = async () => {
-        if (loadingCompare || loadingAsk || loadingGap || loadingThematic) return;
+        if (loadingCompare || loadingAsk || loadingGap || loadingThematic || loadingTrend) return;
 
         if (selectedComparisonPaperIds.length < 2 || selectedComparisonPaperIds.length > 4) {
             setCompareError('Please select between 2 and 4 papers for comparison.');
@@ -1174,7 +1204,7 @@ function ResearchWorkspace() {
 
     // Send Multi-Paper Research Gap Analysis via POST /api/ai/gap-analysis/
     const handleGenerateGapAnalysis = async () => {
-        if (loadingGap || loadingCompare || loadingAsk || loadingThematic) return;
+        if (loadingGap || loadingCompare || loadingAsk || loadingThematic || loadingTrend) return;
 
         if (selectedGapPaperIds.length < 2 || selectedGapPaperIds.length > 4) {
             setGapError('Please select between 2 and 4 papers for research gap analysis.');
@@ -1308,7 +1338,7 @@ function ResearchWorkspace() {
 
     // Send Multi-Paper Thematic Analysis via POST /api/ai/thematic-analysis/
     const handleGenerateThematicAnalysis = async () => {
-        if (loadingThematic || loadingGap || loadingCompare || loadingAsk) return;
+        if (loadingThematic || loadingGap || loadingCompare || loadingAsk || loadingTrend) return;
 
         if (selectedThematicPaperIds.length < 2 || selectedThematicPaperIds.length > 4) {
             setThematicError('Please select between 2 and 4 papers for thematic analysis.');
@@ -1435,6 +1465,170 @@ function ResearchWorkspace() {
         }
     };
 
+    // Send Multi-Paper Research Trend Analysis via POST /api/ai/research-trends/
+    const handleGenerateTrendAnalysis = async () => {
+        if (loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk) return;
+
+        if (selectedTrendPaperIds.length < 2 || selectedTrendPaperIds.length > 4) {
+            setTrendError('Please select between 2 and 4 papers for research trend analysis.');
+            return;
+        }
+
+        if (!activeSessionId) return;
+
+        const trimmed = trendQuestion.trim();
+        const effectiveQuestion = trimmed || DEFAULT_TREND_QUESTION;
+
+        try {
+            setLoadingTrend(true);
+            setTrendError('');
+
+            const res = await api.post('/ai/research-trends/', {
+                paper_ids: selectedTrendPaperIds,
+                question: effectiveQuestion,
+                session_id: activeSessionId
+            });
+
+            // Clear input on success
+            setTrendQuestion('');
+
+            const trendData = res.data.trend_analysis || {};
+
+            // Collect all unique sources from response across all sections
+            const paperMap = {};
+            (activeSession?.papers || []).forEach((p) => {
+                paperMap[p.id] = p.title;
+            });
+
+            const allSources = [];
+            const seenKeys = new Set();
+
+            // 1. research_evolution
+            const evolution = trendData.research_evolution || [];
+            if (Array.isArray(evolution)) {
+                evolution.forEach((ev) => {
+                    if (ev && Array.isArray(ev.papers)) {
+                        ev.papers.forEach((pEntry) => {
+                            if (pEntry && Array.isArray(pEntry.sources)) {
+                                pEntry.sources.forEach((src) => {
+                                    if (src) {
+                                        const key = src.chunk_id
+                                            ? `${src.paper_id}-${src.chunk_id}`
+                                            : `${src.paper_id}-${src.page_number}-${src.text}`;
+                                        if (!seenKeys.has(key)) {
+                                            seenKeys.add(key);
+                                            allSources.push({
+                                                id: src.chunk_id || `ev-trend-${Date.now()}-${allSources.length}`,
+                                                paper_id: src.paper_id,
+                                                paper_title: paperMap[src.paper_id] || pEntry.paper_title || src.paper_title || 'Paper',
+                                                chunk_id: src.chunk_id,
+                                                page_number: src.page_number,
+                                                text: src.text || ''
+                                            });
+                                        }
+                                    }
+                                });
+                            }
+                        });
+                    }
+                });
+            }
+
+            // 2. emerging_directions, methodology_evolution, future_directions
+            const otherSections = [
+                trendData.emerging_directions,
+                trendData.methodology_evolution,
+                trendData.future_directions
+            ];
+            otherSections.forEach((sectionList) => {
+                if (Array.isArray(sectionList)) {
+                    sectionList.forEach((item) => {
+                        if (item && Array.isArray(item.sources)) {
+                            item.sources.forEach((src) => {
+                                if (src) {
+                                    const key = src.chunk_id
+                                        ? `${src.paper_id}-${src.chunk_id}`
+                                        : `${src.paper_id}-${src.page_number}-${src.text}`;
+                                    if (!seenKeys.has(key)) {
+                                        seenKeys.add(key);
+                                        allSources.push({
+                                            id: src.chunk_id || `ev-trend-${Date.now()}-${allSources.length}`,
+                                            paper_id: src.paper_id,
+                                            paper_title: paperMap[src.paper_id] || src.paper_title || 'Paper',
+                                            chunk_id: src.chunk_id,
+                                            page_number: src.page_number,
+                                            text: src.text || ''
+                                        });
+                                    }
+                                }
+                            });
+                        }
+                    });
+                }
+            });
+
+            const userMsg = {
+                id: `user-${Date.now()}`,
+                role: 'USER',
+                content: effectiveQuestion,
+                created_at: new Date().toISOString()
+            };
+
+            const assistantMsg = {
+                id: `assistant-${Date.now()}`,
+                role: 'ASSISTANT',
+                content: trendData,
+                created_at: new Date().toISOString(),
+                evidence: allSources
+            };
+
+            // Auto-title session if default title
+            const isDefaultTitle = activeSession?.title === 'Research Session' || activeSession?.title === 'New Research Session';
+            const isFirstMessage = (!activeSession?.messages || activeSession.messages.length === 0);
+            let nextTrendTitle = activeSession?.title || 'Research Session';
+            if (isDefaultTitle && isFirstMessage) {
+                const autoTitle = generateAutoTitle(effectiveQuestion);
+                if (autoTitle && autoTitle !== nextTrendTitle) {
+                    nextTrendTitle = autoTitle;
+                    api.patch(`/ai/sessions/${activeSessionId}/`, { title: autoTitle }).catch((err) => {
+                        console.warn('Failed to auto-update session title:', err);
+                    });
+                }
+            }
+
+            setActiveSession((prev) => ({
+                ...prev,
+                title: nextTrendTitle,
+                messages: [...(prev?.messages || []), userMsg, assistantMsg],
+                updated_at: new Date().toISOString()
+            }));
+
+            setSessions((prev) =>
+                prev.map((s) => (s.id === activeSessionId ? { ...s, title: nextTrendTitle, updated_at: new Date().toISOString() } : s))
+            );
+
+            scrollToBottom();
+        } catch (err) {
+            if (err.response?.status === 400) {
+                setTrendError(err.response.data?.error || 'Please select between 2 and 4 papers.');
+            } else if (err.response?.status === 401) {
+                setTrendError('Authentication required.');
+            } else if (err.response?.status === 403) {
+                setTrendError('You do not have access to one or more selected papers or this session.');
+            } else if (err.response?.status === 404) {
+                setTrendError('Research session or papers not found.');
+            } else if (err.response?.status === 429) {
+                setTrendError('Gemini API rate limit exceeded. Please try again later.');
+            } else if (err.response?.status === 503) {
+                setTrendError('Gemini is temporarily unavailable. Please try again shortly.');
+            } else {
+                setTrendError(err.response?.data?.error || 'Network or server error. Please try again.');
+            }
+        } finally {
+            setLoadingTrend(false);
+        }
+    };
+
     // Keyboard shortcut for Single-Paper Ask
     const handleKeyDown = (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -1458,10 +1652,11 @@ function ResearchWorkspace() {
             );
         }
 
-        // Assistant Message: Check for structured comparison, research gap analysis, or thematic analysis JSON
+        // Assistant Message: Check for structured comparison, research gap analysis, thematic analysis, or trend analysis JSON
         const parsedComp = parseStructuredComparison(msg.content, activeSession?.papers || []);
         const parsedGap = !parsedComp ? parseStructuredGapAnalysis(msg.content, activeSession?.papers || []) : null;
         const parsedThematic = (!parsedComp && !parsedGap) ? parseStructuredThematicAnalysis(msg.content, activeSession?.papers || []) : null;
+        const parsedTrend = (!parsedComp && !parsedGap && !parsedThematic) ? parseStructuredTrendAnalysis(msg.content, activeSession?.papers || []) : null;
 
         return (
             <div key={msg.id} className="message-row assistant">
@@ -1904,12 +2099,191 @@ function ResearchWorkspace() {
                                 </div>
                             )}
                         </div>
+                    ) : parsedTrend ? (
+                        <div className="structured-trend-view">
+                            <span className="trend-badge-tag">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                    <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
+                                    <polyline points="17 6 23 6 23 12"></polyline>
+                                </svg>
+                                Research Trend Analysis
+                            </span>
+
+                            {/* Overall Trend */}
+                            {parsedTrend.overall_trend && (
+                                <div className="comparison-box trend-overall-box">
+                                    <h4 className="comparison-box-title" style={{ color: 'var(--accent-primary)' }}>
+                                        Overall Research Trend
+                                    </h4>
+                                    <p style={{ margin: 0, lineHeight: 1.6, color: 'var(--text-primary)' }}>
+                                        {parsedTrend.overall_trend}
+                                    </p>
+                                </div>
+                            )}
+
+                            {/* Research Evolution */}
+                            {Array.isArray(parsedTrend.research_evolution) && parsedTrend.research_evolution.length > 0 && (
+                                <div className="trend-evolution-section">
+                                    <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
+                                        Research Evolution ({parsedTrend.research_evolution.length})
+                                    </h4>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                        {parsedTrend.research_evolution.map((evItem, evIdx) => (
+                                            <div key={evIdx} className="comparison-box trend-card">
+                                                <div className="trend-header">
+                                                    <span className="trend-number">Trend {evIdx + 1}</span>
+                                                    <h5 className="trend-title">{evItem.trend}</h5>
+                                                </div>
+
+                                                {evItem.description && (
+                                                    <p className="trend-desc">{evItem.description}</p>
+                                                )}
+
+                                                {/* Participating papers & observations */}
+                                                {Array.isArray(evItem.papers) && evItem.papers.length > 0 && (
+                                                    <div className="trend-papers-section">
+                                                        <h6 className="trend-subheading">Participating Papers & Observations</h6>
+                                                        <div className="trend-papers-list">
+                                                            {evItem.papers.map((pEntry, pIdx) => (
+                                                                <div key={pIdx} className="trend-paper-entry">
+                                                                    <div className="trend-paper-entry-header">
+                                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                                                            <polyline points="14 2 14 8 20 8"></polyline>
+                                                                        </svg>
+                                                                        <span className="trend-paper-entry-title">
+                                                                            {pEntry.paper_title || `Paper #${pEntry.paper_id}`}
+                                                                        </span>
+                                                                    </div>
+                                                                    {pEntry.observation && (
+                                                                        <p className="trend-paper-observation">
+                                                                            {pEntry.observation}
+                                                                        </p>
+                                                                    )}
+                                                                    {Array.isArray(pEntry.sources) && pEntry.sources.length > 0 && (
+                                                                        <div style={{ marginTop: '0.4rem' }}>
+                                                                            {pEntry.sources.map((src, sIdx) => (
+                                                                                <EvidenceSource key={sIdx} source={src} projectId={projectId} />
+                                                                            ))}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {/* Evolution observation */}
+                                                {evItem.evolution_observation && (
+                                                    <div className="trend-observation-box">
+                                                        <div className="trend-observation-label">
+                                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
+                                                                <polyline points="17 6 23 6 23 12"></polyline>
+                                                            </svg>
+                                                            Evolution Observation
+                                                        </div>
+                                                        <p className="trend-observation-text">
+                                                            {evItem.evolution_observation}
+                                                        </p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Emerging Research Directions */}
+                            {Array.isArray(parsedTrend.emerging_directions) && parsedTrend.emerging_directions.length > 0 && (
+                                <div>
+                                    <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
+                                        Emerging Research Directions ({parsedTrend.emerging_directions.length})
+                                    </h4>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                        {parsedTrend.emerging_directions.map((item, idx) => (
+                                            <div key={idx} className="comparison-box trend-feature-box">
+                                                <h5 className="trend-feature-title">{item.direction}</h5>
+                                                {item.description && (
+                                                    <p style={{ margin: '0.25rem 0 0 0', lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+                                                        {item.description}
+                                                    </p>
+                                                )}
+                                                {Array.isArray(item.sources) && item.sources.length > 0 && (
+                                                    <div style={{ marginTop: '0.5rem' }}>
+                                                        {item.sources.map((src, sIdx) => (
+                                                            <EvidenceSource key={sIdx} source={src} projectId={projectId} />
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Methodology Evolution */}
+                            {Array.isArray(parsedTrend.methodology_evolution) && parsedTrend.methodology_evolution.length > 0 && (
+                                <div>
+                                    <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
+                                        Methodology Evolution ({parsedTrend.methodology_evolution.length})
+                                    </h4>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                        {parsedTrend.methodology_evolution.map((item, idx) => (
+                                            <div key={idx} className="comparison-box trend-feature-box">
+                                                <h5 className="trend-feature-title">{item.aspect}</h5>
+                                                {item.description && (
+                                                    <p style={{ margin: '0.25rem 0 0 0', lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+                                                        {item.description}
+                                                    </p>
+                                                )}
+                                                {Array.isArray(item.sources) && item.sources.length > 0 && (
+                                                    <div style={{ marginTop: '0.5rem' }}>
+                                                        {item.sources.map((src, sIdx) => (
+                                                            <EvidenceSource key={sIdx} source={src} projectId={projectId} />
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Future Research Directions */}
+                            {Array.isArray(parsedTrend.future_directions) && parsedTrend.future_directions.length > 0 && (
+                                <div>
+                                    <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
+                                        Future Research Directions ({parsedTrend.future_directions.length})
+                                    </h4>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                        {parsedTrend.future_directions.map((item, idx) => (
+                                            <div key={idx} className="comparison-box trend-feature-box">
+                                                <h5 className="trend-feature-title">{item.direction}</h5>
+                                                {item.description && (
+                                                    <p style={{ margin: '0.25rem 0 0 0', lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+                                                        {item.description}
+                                                    </p>
+                                                )}
+                                                {Array.isArray(item.sources) && item.sources.length > 0 && (
+                                                    <div style={{ marginTop: '0.5rem' }}>
+                                                        {item.sources.map((src, sIdx) => (
+                                                            <EvidenceSource key={sIdx} source={src} projectId={projectId} />
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     ) : (
                         <p className="message-text">{msg.content}</p>
                     )}
 
                     {/* Saved Grounded Evidence Sources (Single-Paper Ask) */}
-                    {Array.isArray(msg.evidence) && msg.evidence.length > 0 && !parsedComp && !parsedGap && !parsedThematic && (
+                    {Array.isArray(msg.evidence) && msg.evidence.length > 0 && !parsedComp && !parsedGap && !parsedThematic && !parsedTrend && (
                         <div className="message-evidence-container">
                             <div className="evidence-header-label">
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -2360,6 +2734,13 @@ function ResearchWorkspace() {
                                     </div>
                                 )}
 
+                                {loadingTrend && (
+                                    <div className="ai-analyzing-banner trend-banner">
+                                        <span className="spinner-icon-sm"></span>
+                                        <span>NForge AI is analyzing research trends across papers...</span>
+                                    </div>
+                                )}
+
                                 <div ref={messagesEndRef} />
                             </div>
 
@@ -2373,7 +2754,7 @@ function ResearchWorkspace() {
                                                 type="button"
                                                 className={`chat-mode-tab ${chatMode === 'ask' ? 'active' : ''}`}
                                                 onClick={() => setChatMode('ask')}
-                                                disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic}
+                                                disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend}
                                             >
                                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                                     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
@@ -2384,7 +2765,7 @@ function ResearchWorkspace() {
                                                 type="button"
                                                 className={`chat-mode-tab ${chatMode === 'compare' ? 'active' : ''}`}
                                                 onClick={() => setChatMode('compare')}
-                                                disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic || !hasAtLeastTwoPapers}
+                                                disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend || !hasAtLeastTwoPapers}
                                                 title={!hasAtLeastTwoPapers ? 'Add at least 2 papers to compare' : 'Compare 2 to 4 papers'}
                                             >
                                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -2405,7 +2786,7 @@ function ResearchWorkspace() {
                                                 type="button"
                                                 className={`chat-mode-tab ${chatMode === 'gap' ? 'active' : ''}`}
                                                 onClick={() => setChatMode('gap')}
-                                                disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic || !hasAtLeastTwoPapers}
+                                                disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend || !hasAtLeastTwoPapers}
                                                 title={!hasAtLeastTwoPapers ? 'Add at least 2 papers to analyze gaps' : 'Identify research gaps across 2 to 4 papers'}
                                             >
                                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -2424,13 +2805,31 @@ function ResearchWorkspace() {
                                                 type="button"
                                                 className={`chat-mode-tab ${chatMode === 'thematic' ? 'active' : ''}`}
                                                 onClick={() => setChatMode('thematic')}
-                                                disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic || !hasAtLeastTwoPapers}
+                                                disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend || !hasAtLeastTwoPapers}
                                                 title={!hasAtLeastTwoPapers ? 'Add at least 2 papers to analyze themes' : 'Identify cross-paper themes across 2 to 4 papers'}
                                             >
                                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                                     <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
                                                 </svg>
                                                 Thematic Analysis
+                                                {!hasAtLeastTwoPapers ? (
+                                                    <span className="mode-tab-badge disabled">Requires 2+ papers</span>
+                                                ) : (
+                                                    <span className="mode-tab-badge">2–4</span>
+                                                )}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                className={`chat-mode-tab ${chatMode === 'trends' ? 'active' : ''}`}
+                                                onClick={() => setChatMode('trends')}
+                                                disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend || !hasAtLeastTwoPapers}
+                                                title={!hasAtLeastTwoPapers ? 'Add at least 2 papers to analyze research trends' : 'Analyze research trends across 2 to 4 papers'}
+                                            >
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                    <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
+                                                    <polyline points="17 6 23 6 23 12"></polyline>
+                                                </svg>
+                                                Research Trends
                                                 {!hasAtLeastTwoPapers ? (
                                                     <span className="mode-tab-badge disabled">Requires 2+ papers</span>
                                                 ) : (
@@ -2451,7 +2850,7 @@ function ResearchWorkspace() {
                                                         className="chat-paper-select"
                                                         value={selectedPaperId}
                                                         onChange={(e) => setSelectedPaperId(e.target.value)}
-                                                        disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic}
+                                                        disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend}
                                                     >
                                                         {activeSession.papers.map((p) => (
                                                             <option key={p.id} value={p.id}>
@@ -2474,7 +2873,7 @@ function ResearchWorkspace() {
                                                             key={idx}
                                                             type="button"
                                                             className="prompt-shortcut-btn"
-                                                            disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic}
+                                                            disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend}
                                                             onClick={() => setQuestionText(item.prompt)}
                                                             title={item.prompt}
                                                             aria-label={`Fill prompt: ${item.label}`}
@@ -2497,13 +2896,13 @@ function ResearchWorkspace() {
                                                         value={questionText}
                                                         onChange={(e) => setQuestionText(e.target.value)}
                                                         onKeyDown={handleKeyDown}
-                                                        disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic}
+                                                        disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend}
                                                         rows={2}
                                                     />
                                                     <button
                                                         className="chat-send-btn"
                                                         onClick={handleSendQuestion}
-                                                        disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic || !questionText.trim() || !selectedPaperId}
+                                                        disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend || !questionText.trim() || !selectedPaperId}
                                                         title="Send question (Enter)"
                                                         type="button"
                                                     >
@@ -2550,7 +2949,7 @@ function ResearchWorkspace() {
                                                                     <input
                                                                         type="checkbox"
                                                                         checked={isSelected}
-                                                                        disabled={loadingThematic || loadingCompare || loadingGap || loadingAsk || isMaxReached}
+                                                                        disabled={loadingTrend || loadingThematic || loadingCompare || loadingGap || loadingAsk || isMaxReached}
                                                                         onChange={() => handleToggleComparisonPaper(p.id)}
                                                                     />
                                                                     <span className="compare-paper-pill-title">{p.title}</span>
@@ -2577,7 +2976,7 @@ function ResearchWorkspace() {
                                                             key={idx}
                                                             type="button"
                                                             className="prompt-shortcut-btn"
-                                                            disabled={loadingThematic || loadingCompare || loadingAsk || loadingGap}
+                                                            disabled={loadingTrend || loadingThematic || loadingCompare || loadingAsk || loadingGap}
                                                             onClick={() => setComparisonQuestion(item.prompt)}
                                                             title={item.prompt}
                                                             aria-label={`Fill prompt: ${item.label}`}
@@ -2599,13 +2998,13 @@ function ResearchWorkspace() {
                                                         placeholder="What would you like to compare? e.g. methodology, findings, limitations, and research gaps"
                                                         value={comparisonQuestion}
                                                         onChange={(e) => setComparisonQuestion(e.target.value)}
-                                                        disabled={loadingThematic || loadingCompare || loadingGap || loadingAsk}
+                                                        disabled={loadingTrend || loadingThematic || loadingCompare || loadingGap || loadingAsk}
                                                         rows={2}
                                                     />
                                                     <button
                                                         className="chat-send-btn compare-btn"
                                                         onClick={handleGenerateComparison}
-                                                        disabled={loadingThematic || loadingCompare || loadingGap || loadingAsk || selectedComparisonPaperIds.length < 2 || selectedComparisonPaperIds.length > 4}
+                                                        disabled={loadingTrend || loadingThematic || loadingCompare || loadingGap || loadingAsk || selectedComparisonPaperIds.length < 2 || selectedComparisonPaperIds.length > 4}
                                                         title="Generate cross-paper comparison"
                                                         type="button"
                                                     >
@@ -2655,7 +3054,7 @@ function ResearchWorkspace() {
                                                                     <input
                                                                         type="checkbox"
                                                                         checked={isSelected}
-                                                                        disabled={loadingThematic || loadingGap || loadingCompare || loadingAsk || isMaxReached}
+                                                                        disabled={loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk || isMaxReached}
                                                                         onChange={() => handleToggleGapPaper(p.id)}
                                                                     />
                                                                     <span className="compare-paper-pill-title">{p.title}</span>
@@ -2680,7 +3079,7 @@ function ResearchWorkspace() {
                                                             key={idx}
                                                             type="button"
                                                             className="prompt-shortcut-btn"
-                                                            disabled={loadingThematic || loadingGap || loadingCompare || loadingAsk}
+                                                            disabled={loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk}
                                                             onClick={() => setGapQuestion(item.prompt)}
                                                             title={item.prompt}
                                                             aria-label={`Fill prompt: ${item.label}`}
@@ -2702,13 +3101,13 @@ function ResearchWorkspace() {
                                                         placeholder="Identify the major research gaps, limitations, unanswered questions, and future research directions across these papers..."
                                                         value={gapQuestion}
                                                         onChange={(e) => setGapQuestion(e.target.value)}
-                                                        disabled={loadingThematic || loadingGap || loadingCompare || loadingAsk}
+                                                        disabled={loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk}
                                                         rows={2}
                                                     />
                                                     <button
                                                         className="chat-send-btn gap-btn"
                                                         onClick={handleGenerateGapAnalysis}
-                                                        disabled={loadingThematic || loadingGap || loadingCompare || loadingAsk || selectedGapPaperIds.length < 2 || selectedGapPaperIds.length > 4}
+                                                        disabled={loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk || selectedGapPaperIds.length < 2 || selectedGapPaperIds.length > 4}
                                                         title="Generate research gap analysis"
                                                         type="button"
                                                     >
@@ -2756,7 +3155,7 @@ function ResearchWorkspace() {
                                                                     <input
                                                                         type="checkbox"
                                                                         checked={isSelected}
-                                                                        disabled={loadingThematic || loadingGap || loadingCompare || loadingAsk || isMaxReached}
+                                                                        disabled={loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk || isMaxReached}
                                                                         onChange={() => handleToggleThematicPaper(p.id)}
                                                                     />
                                                                     <span className="compare-paper-pill-title">{p.title}</span>
@@ -2779,7 +3178,7 @@ function ResearchWorkspace() {
                                                             key={idx}
                                                             type="button"
                                                             className="prompt-shortcut-btn"
-                                                            disabled={loadingThematic || loadingGap || loadingCompare || loadingAsk}
+                                                            disabled={loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk}
                                                             onClick={() => setThematicQuestion(item.prompt)}
                                                             title={item.prompt}
                                                             aria-label={`Fill prompt: ${item.label}`}
@@ -2801,13 +3200,13 @@ function ResearchWorkspace() {
                                                         placeholder="Identify the major themes, recurring concepts, and important cross-paper patterns across these papers..."
                                                         value={thematicQuestion}
                                                         onChange={(e) => setThematicQuestion(e.target.value)}
-                                                        disabled={loadingThematic || loadingGap || loadingCompare || loadingAsk}
+                                                        disabled={loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk}
                                                         rows={2}
                                                     />
                                                     <button
                                                         className="chat-send-btn thematic-btn"
                                                         onClick={handleGenerateThematicAnalysis}
-                                                        disabled={loadingThematic || loadingGap || loadingCompare || loadingAsk || selectedThematicPaperIds.length < 2 || selectedThematicPaperIds.length > 4}
+                                                        disabled={loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk || selectedThematicPaperIds.length < 2 || selectedThematicPaperIds.length > 4}
                                                         title="Generate cross-paper thematic analysis"
                                                         type="button"
                                                     >
@@ -2819,6 +3218,105 @@ function ResearchWorkspace() {
                                                             </svg>
                                                         )}
                                                         <span>Generate Thematic Analysis</span>
+                                                    </button>
+                                                </div>
+                                            </>
+                                        )}
+
+                                        {/* MODE 5: Multi-Paper Research Trend Analysis */}
+                                        {chatMode === 'trends' && (
+                                            <>
+                                                {/* Select 2-4 Papers for Research Trend Analysis */}
+                                                <div className="compare-selection-bar">
+                                                    <div className="compare-selection-header">
+                                                        <span className="compare-selection-title">
+                                                            Select 2 to 4 papers to analyze research trends:
+                                                        </span>
+                                                        <span className={`compare-selection-count ${selectedTrendPaperIds.length < 2 ? 'warn' : 'valid'}`}>
+                                                            {selectedTrendPaperIds.length}/4 selected
+                                                            {selectedTrendPaperIds.length < 2 && ' (minimum 2)'}
+                                                        </span>
+                                                    </div>
+
+                                                    <div className="compare-papers-grid">
+                                                        {activeSession.papers.map((p) => {
+                                                            const isSelected = selectedTrendPaperIds.includes(p.id);
+                                                            const isMaxReached = selectedTrendPaperIds.length >= 4 && !isSelected;
+
+                                                            return (
+                                                                <label
+                                                                    key={p.id}
+                                                                    className={`compare-paper-pill ${isSelected ? 'selected' : ''} ${isMaxReached ? 'disabled' : ''}`}
+                                                                    title={isMaxReached ? 'Maximum 4 papers reached (deselect one first)' : p.title}
+                                                                >
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={isSelected}
+                                                                        disabled={loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk || isMaxReached}
+                                                                        onChange={() => handleToggleTrendPaper(p.id)}
+                                                                    />
+                                                                    <span className="compare-paper-pill-title">{p.title}</span>
+                                                                </label>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+
+                                                {/* Research Prompt Shortcuts for Trend Analysis */}
+                                                <div className="prompt-shortcuts-row">
+                                                    <span className="prompt-shortcuts-label">
+                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ opacity: 0.75 }}>
+                                                            <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
+                                                            <polyline points="17 6 23 6 23 12"></polyline>
+                                                        </svg>
+                                                        Trend prompts:
+                                                    </span>
+                                                    {TREND_SHORTCUTS.map((item, idx) => (
+                                                        <button
+                                                            key={idx}
+                                                            type="button"
+                                                            className="prompt-shortcut-btn"
+                                                            disabled={loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk}
+                                                            onClick={() => setTrendQuestion(item.prompt)}
+                                                            title={item.prompt}
+                                                            aria-label={`Fill prompt: ${item.label}`}
+                                                        >
+                                                            {item.label}
+                                                        </button>
+                                                    ))}
+                                                </div>
+
+                                                {trendError && (
+                                                    <div className="alert-box error" style={{ marginBottom: '0.75rem' }}>
+                                                        {trendError}
+                                                    </div>
+                                                )}
+
+                                                <div className="chat-input-row">
+                                                    <textarea
+                                                        className="chat-textarea"
+                                                        placeholder="Analyze how research has evolved across these papers, including changes in methods, approaches, research focus, emerging directions, and future research."
+                                                        value={trendQuestion}
+                                                        onChange={(e) => setTrendQuestion(e.target.value)}
+                                                        disabled={loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk}
+                                                        rows={2}
+                                                    />
+                                                    <button
+                                                        className="chat-send-btn trend-btn"
+                                                        onClick={handleGenerateTrendAnalysis}
+                                                        disabled={loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk || selectedTrendPaperIds.length < 2 || selectedTrendPaperIds.length > 4}
+                                                        title="Generate research trend analysis"
+                                                        type="button"
+                                                    >
+                                                        {loadingTrend ? (
+                                                            <span className="spinner-icon-sm"></span>
+                                                        ) : (
+                                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
+                                                                <polyline points="17 6 23 6 23 12"></polyline>
+                                                            </svg>
+                                                        )}
+                                                        <span>Generate Trend Analysis</span>
                                                     </button>
                                                 </div>
                                             </>
