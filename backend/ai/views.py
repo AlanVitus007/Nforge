@@ -136,19 +136,27 @@ def ask_ai(request):
                     content=ai_response["answer"],
                 )
 
+                created_evidences = []
                 for source in ai_response.get("sources", []):
                     chunk_obj = None
                     cid = source.get("chunk_id")
                     if cid:
                         chunk_obj = PaperChunk.objects.filter(id=cid).first()
 
-                    ResearchEvidence.objects.create(
+                    ev = ResearchEvidence.objects.create(
                         message=assistant_msg,
                         paper=paper,
                         chunk=chunk_obj,
                         page_number=source.get("page_number"),
                         text=source.get("text") or "",
                     )
+                    created_evidences.append(ev)
+
+                from .citations import build_citation_map
+                ai_response["citation_map"] = build_citation_map(
+                    created_evidences,
+                    expected_project=paper.project_id
+                )
 
                 session.save()
                 ai_response["session_id"] = session.id
@@ -383,6 +391,7 @@ def compare_papers_view(request):
                 chunk_ids = [s.get("chunk_id") for s in unique_sources if s.get("chunk_id")]
                 chunks_by_id = {c.id: c for c in PaperChunk.objects.filter(id__in=chunk_ids)} if chunk_ids else {}
 
+                created_evidences = []
                 for src in unique_sources:
                     paper_id = src.get("paper_id")
                     paper_obj = paper_map.get(paper_id)
@@ -393,13 +402,20 @@ def compare_papers_view(request):
 
                     chunk_obj = chunks_by_id.get(src.get("chunk_id"))
 
-                    ResearchEvidence.objects.create(
+                    ev = ResearchEvidence.objects.create(
                         message=assistant_msg,
                         paper=paper_obj,
                         chunk=chunk_obj,
                         page_number=src.get("page_number"),
                         text=src.get("text") or "",
                     )
+                    created_evidences.append(ev)
+
+                from .citations import build_citation_map
+                comparison_response["citation_map"] = build_citation_map(
+                    created_evidences,
+                    expected_project=session.project_id
+                )
 
                 session.save()
                 comparison_response["session_id"] = session.id
@@ -571,6 +587,7 @@ def research_gap_analysis_view(request):
                 chunk_ids = [s.get("chunk_id") for s in unique_sources if s.get("chunk_id")]
                 chunks_by_id = {c.id: c for c in PaperChunk.objects.filter(id__in=chunk_ids)} if chunk_ids else {}
 
+                created_evidences = []
                 for src in unique_sources:
                     paper_id = src.get("paper_id")
                     paper_obj = paper_map.get(paper_id)
@@ -581,13 +598,20 @@ def research_gap_analysis_view(request):
 
                     chunk_obj = chunks_by_id.get(src.get("chunk_id"))
 
-                    ResearchEvidence.objects.create(
+                    ev = ResearchEvidence.objects.create(
                         message=assistant_msg,
                         paper=paper_obj,
                         chunk=chunk_obj,
                         page_number=src.get("page_number"),
                         text=src.get("text") or "",
                     )
+                    created_evidences.append(ev)
+
+                from .citations import build_citation_map
+                gap_response["citation_map"] = build_citation_map(
+                    created_evidences,
+                    expected_project=session.project_id
+                )
 
                 session.save()
                 gap_response["session_id"] = session.id
@@ -754,6 +778,7 @@ def thematic_analysis_view(request):
                 chunk_ids = [s.get("chunk_id") for s in unique_sources if s.get("chunk_id")]
                 chunks_by_id = {c.id: c for c in PaperChunk.objects.filter(id__in=chunk_ids)} if chunk_ids else {}
 
+                created_evidences = []
                 for src in unique_sources:
                     paper_id = src.get("paper_id")
                     paper_obj = paper_map.get(paper_id)
@@ -764,13 +789,20 @@ def thematic_analysis_view(request):
 
                     chunk_obj = chunks_by_id.get(src.get("chunk_id"))
 
-                    ResearchEvidence.objects.create(
+                    ev = ResearchEvidence.objects.create(
                         message=assistant_msg,
                         paper=paper_obj,
                         chunk=chunk_obj,
                         page_number=src.get("page_number"),
                         text=src.get("text") or "",
                     )
+                    created_evidences.append(ev)
+
+                from .citations import build_citation_map
+                thematic_response["citation_map"] = build_citation_map(
+                    created_evidences,
+                    expected_project=session.project_id
+                )
 
                 session.save()
                 thematic_response["session_id"] = session.id
@@ -958,6 +990,7 @@ def research_trends_view(request):
                 chunk_ids = [s.get("chunk_id") for s in unique_sources if s.get("chunk_id")]
                 chunks_by_id = {c.id: c for c in PaperChunk.objects.filter(id__in=chunk_ids)} if chunk_ids else {}
 
+                created_evidences = []
                 for src in unique_sources:
                     paper_id = src.get("paper_id")
                     paper_obj = paper_map.get(paper_id)
@@ -968,13 +1001,20 @@ def research_trends_view(request):
 
                     chunk_obj = chunks_by_id.get(src.get("chunk_id"))
 
-                    ResearchEvidence.objects.create(
+                    ev = ResearchEvidence.objects.create(
                         message=assistant_msg,
                         paper=paper_obj,
                         chunk=chunk_obj,
                         page_number=src.get("page_number"),
                         text=src.get("text") or "",
                     )
+                    created_evidences.append(ev)
+
+                from .citations import build_citation_map
+                trend_response["citation_map"] = build_citation_map(
+                    created_evidences,
+                    expected_project=session.project_id
+                )
 
                 session.save()
                 trend_response["session_id"] = session.id
@@ -1110,12 +1150,10 @@ def session_detail_view(request, session_id):
                 "code": "FORBIDDEN"
             }, status=status.HTTP_403_FORBIDDEN)
 
-        supplied_project_id = request.query_params.get("project_id") or (
-            request.data.get("project_id") if isinstance(request.data, dict) else None
-        )
-        if supplied_project_id is not None:
+        query_project_id = request.query_params.get("project_id")
+        if query_project_id is not None:
             try:
-                if int(supplied_project_id) != session.project_id:
+                if int(query_project_id) != session.project_id:
                     return Response({
                         "error": "Research session does not belong to the specified project.",
                         "code": "BAD_REQUEST"

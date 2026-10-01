@@ -4504,6 +4504,913 @@ class ResearchTrendAnalysisAPITests(TestCase):
             self.assertEqual(mock_service.call_count, 1)
 
 
+class CitationAwareBackendFoundationTests(TestCase):
+    """
+    Focused unit tests for Phase 7.5.1 — Citation-Aware Backend Foundation for NForge.
+    Tests:
+    1. Valid citation generation (single-paper and multi-paper)
+    2. Citation resolution
+    3. Invalid source rejection
+    4. Missing page number handling
+    5. Duplicate evidence handling
+    6. Cross-project evidence rejection
+    7. Single-paper evidence integration
+    8. Multi-paper evidence integration
+    """
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        from projects.models import Project
+        from papers.models import Paper
+        from ai.models import PaperChunk, ResearchSession, ResearchMessage, ResearchEvidence
+
+        self.user = User.objects.create_user(username="citation_tester", password="password")
+        self.proj1 = Project.objects.create(owner=self.user, title="Citation Project 1")
+        self.proj2 = Project.objects.create(owner=self.user, title="Citation Project 2")
+
+        # Papers for Project 1
+        self.paper1 = Paper.objects.create(project=self.proj1, title="Paper Alpha")
+        self.paper2 = Paper.objects.create(project=self.proj1, title="Paper Beta")
+        self.paper3 = Paper.objects.create(project=self.proj1, title="Paper Gamma")
+
+        # Paper for Project 2 (cross-project test)
+        self.paper_other = Paper.objects.create(project=self.proj2, title="Paper Cross Project")
+
+        # Chunks for Paper 1
+        self.chunk1 = PaperChunk.objects.create(
+            paper=self.paper1,
+            chunk_index=0,
+            page_number=3,
+            text="Attention mechanisms allow modeling of dependencies.",
+            embedding=[0.1] * 384,
+        )
+        self.chunk1_nopage = PaperChunk.objects.create(
+            paper=self.paper1,
+            chunk_index=1,
+            page_number=None,
+            text="Positional encodings inject sequence order.",
+            embedding=[0.2] * 384,
+        )
+
+        # Chunks for Paper 2
+        self.chunk2 = PaperChunk.objects.create(
+            paper=self.paper2,
+            chunk_index=0,
+            page_number=7,
+            text="Residual connections prevent gradient vanishing in deep nets.",
+            embedding=[0.3] * 384,
+        )
+
+        # Chunks for Paper 3
+        self.chunk3 = PaperChunk.objects.create(
+            paper=self.paper3,
+            chunk_index=0,
+            page_number=12,
+            text="Layer normalization stabilizes hidden state dynamics.",
+            embedding=[0.4] * 384,
+        )
+
+        # Chunk for Cross-Project Paper
+        self.chunk_other = PaperChunk.objects.create(
+            paper=self.paper_other,
+            chunk_index=0,
+            page_number=5,
+            text="Cross project text that should never be cited in Project 1.",
+            embedding=[0.5] * 384,
+        )
+
+        # Research Session & Messages in Project 1
+        self.session1 = ResearchSession.objects.create(project=self.proj1, title="Session Citation 1")
+        self.msg_user = ResearchMessage.objects.create(
+            session=self.session1,
+            role=ResearchMessage.ROLE_USER,
+            content="Explain transformer components.",
+        )
+        self.msg_assistant = ResearchMessage.objects.create(
+            session=self.session1,
+            role=ResearchMessage.ROLE_ASSISTANT,
+            content="Transformers use attention and residual connections.",
+        )
+
+    def test_valid_citation_generation_single_paper(self):
+        """Test generating citations from single-paper evidence and sources."""
+        from ai.citations import (
+            build_citation_id,
+            create_citation_reference,
+            generate_citations_from_sources,
+        )
+        from ai.models import ResearchEvidence
+
+        # Deterministic ID check
+        cite_id = build_citation_id(self.paper1.id, self.chunk1.id)
+        self.assertEqual(cite_id, f"cite_p{self.paper1.id}_c{self.chunk1.id}")
+
+        # CitationReference creation
+        ref = create_citation_reference(
+            paper=self.paper1,
+            chunk=self.chunk1,
+            expected_project=self.proj1,
+        )
+        self.assertEqual(ref.citation_id, cite_id)
+        self.assertEqual(ref.paper_id, self.paper1.id)
+        self.assertEqual(ref.paper_title, "Paper Alpha")
+        self.assertEqual(ref.chunk_id, self.chunk1.id)
+        self.assertEqual(ref.page_number, 3)
+        self.assertIn("Attention mechanisms", ref.text)
+
+        # Generating from source dicts
+        sources = [
+            {"paper_id": self.paper1.id, "chunk_id": self.chunk1.id, "text": self.chunk1.text, "page_number": 3}
+        ]
+        citations = generate_citations_from_sources(
+            sources=sources,
+            allowed_papers=[self.paper1],
+            expected_project=self.proj1,
+        )
+        self.assertEqual(len(citations), 1)
+        self.assertEqual(citations[0].citation_id, cite_id)
+        self.assertEqual(citations[0].paper_id, self.paper1.id)
+
+    def test_valid_citation_generation_multi_paper(self):
+        """Test generating citations across multiple papers in the same project."""
+        from ai.citations import generate_citations_from_sources, build_citation_id
+
+        sources = [
+            {"paper_id": self.paper1.id, "chunk_id": self.chunk1.id, "text": self.chunk1.text, "page_number": 3},
+            {"paper_id": self.paper2.id, "chunk_id": self.chunk2.id, "text": self.chunk2.text, "page_number": 7},
+            {"paper_id": self.paper3.id, "chunk_id": self.chunk3.id, "text": self.chunk3.text, "page_number": 12},
+        ]
+
+        citations = generate_citations_from_sources(
+            sources=sources,
+            allowed_papers=[self.paper1, self.paper2, self.paper3],
+            expected_project=self.proj1,
+        )
+
+        self.assertEqual(len(citations), 3)
+        self.assertEqual(citations[0].citation_id, build_citation_id(self.paper1.id, self.chunk1.id))
+        self.assertEqual(citations[1].citation_id, build_citation_id(self.paper2.id, self.chunk2.id))
+        self.assertEqual(citations[2].citation_id, build_citation_id(self.paper3.id, self.chunk3.id))
+
+        # Check paper titles resolved correctly
+        self.assertEqual(citations[0].paper_title, "Paper Alpha")
+        self.assertEqual(citations[1].paper_title, "Paper Beta")
+        self.assertEqual(citations[2].paper_title, "Paper Gamma")
+
+    def test_citation_resolution(self):
+        """Test resolving citation references and IDs back to backing ResearchEvidence."""
+        from ai.models import ResearchEvidence
+        from ai.citations import (
+            resolve_citation,
+            resolve_citations_for_message,
+            build_citation_id,
+        )
+
+        ev1 = ResearchEvidence.objects.create(
+            message=self.msg_assistant,
+            paper=self.paper1,
+            chunk=self.chunk1,
+            page_number=self.chunk1.page_number,
+            text=self.chunk1.text,
+        )
+        ev2 = ResearchEvidence.objects.create(
+            message=self.msg_assistant,
+            paper=self.paper2,
+            chunk=self.chunk2,
+            page_number=self.chunk2.page_number,
+            text=self.chunk2.text,
+        )
+
+        # 1. Resolve by citation ID string
+        cite_id = build_citation_id(self.paper1.id, self.chunk1.id)
+        resolved_ev = resolve_citation(cite_id, message=self.msg_assistant)
+        self.assertEqual(resolved_ev.id, ev1.id)
+        self.assertEqual(resolved_ev.paper, self.paper1)
+
+        # 2. Resolve by dict
+        cite_dict = {"paper_id": self.paper2.id, "chunk_id": self.chunk2.id}
+        resolved_ev2 = resolve_citation(cite_dict, message=self.msg_assistant)
+        self.assertEqual(resolved_ev2.id, ev2.id)
+        self.assertEqual(resolved_ev2.paper, self.paper2)
+
+        # 3. Resolve all citations for a message
+        citations = resolve_citations_for_message(self.msg_assistant, expected_project=self.proj1)
+        self.assertEqual(len(citations), 2)
+        self.assertEqual(citations[0].evidence_id, ev1.id)
+        self.assertEqual(citations[1].evidence_id, ev2.id)
+
+    def test_invalid_source_rejection(self):
+        """Test that invalid citation references and sources are rejected rather than accepted."""
+        from ai.citations import (
+            validate_source_dict,
+            create_citation_reference,
+            build_citation_id,
+            InvalidCitationError,
+        )
+
+        # Non-dict source
+        with self.assertRaises(InvalidCitationError):
+            validate_source_dict("not a dict")
+
+        # Missing paper_id
+        with self.assertRaises(InvalidCitationError):
+            validate_source_dict({"chunk_id": self.chunk1.id})
+
+        # Negative paper_id
+        with self.assertRaises(InvalidCitationError):
+            validate_source_dict({"paper_id": -1, "chunk_id": 1})
+
+        # Paper not in allowed_papers
+        with self.assertRaises(InvalidCitationError):
+            validate_source_dict(
+                {"paper_id": 9999, "chunk_id": 1},
+                allowed_papers=[self.paper1]
+            )
+
+        # Chunk belongs to a different paper
+        with self.assertRaises(InvalidCitationError):
+            create_citation_reference(
+                paper=self.paper1,
+                chunk=self.chunk2,  # chunk2 belongs to paper2
+            )
+
+        # Invalid citation ID building
+        with self.assertRaises(InvalidCitationError):
+            build_citation_id(None)
+
+        with self.assertRaises(InvalidCitationError):
+            build_citation_id("invalid_id")
+
+    def test_missing_page_number_handling(self):
+        """Test that missing page numbers are handled gracefully (null/None) without inventing data."""
+        from ai.models import ResearchEvidence
+        from ai.citations import (
+            create_citation_reference,
+            generate_citations_from_evidence,
+            resolve_citation,
+            build_citation_id,
+        )
+
+        ref = create_citation_reference(
+            paper=self.paper1,
+            chunk=self.chunk1_nopage,
+            expected_project=self.proj1,
+        )
+        self.assertIsNone(ref.page_number)
+        self.assertEqual(ref.citation_id, build_citation_id(self.paper1.id, self.chunk1_nopage.id))
+
+        ev_nopage = ResearchEvidence.objects.create(
+            message=self.msg_assistant,
+            paper=self.paper1,
+            chunk=self.chunk1_nopage,
+            page_number=None,
+            text=self.chunk1_nopage.text,
+        )
+
+        citations = generate_citations_from_evidence([ev_nopage], expected_project=self.proj1)
+        self.assertEqual(len(citations), 1)
+        self.assertIsNone(citations[0].page_number)
+
+        # Resolving evidence with missing page number
+        resolved = resolve_citation(citations[0].citation_id, message=self.msg_assistant)
+        self.assertEqual(resolved.id, ev_nopage.id)
+        self.assertIsNone(resolved.page_number)
+
+    def test_duplicate_evidence_handling(self):
+        """Test that duplicate evidence is coalesced into unified unique citations."""
+        from ai.models import ResearchEvidence
+        from ai.citations import (
+            generate_citations_from_evidence,
+            generate_citations_from_sources,
+        )
+
+        ev1 = ResearchEvidence.objects.create(
+            message=self.msg_assistant,
+            paper=self.paper1,
+            chunk=self.chunk1,
+            page_number=3,
+            text=self.chunk1.text,
+        )
+        ev1_duplicate = ResearchEvidence.objects.create(
+            message=self.msg_assistant,
+            paper=self.paper1,
+            chunk=self.chunk1,
+            page_number=3,
+            text=self.chunk1.text,
+        )
+
+        # 2 evidence objects with same paper and chunk -> exactly 1 citation produced!
+        citations = generate_citations_from_evidence([ev1, ev1_duplicate], expected_project=self.proj1)
+        self.assertEqual(len(citations), 1)
+
+        # Duplicate sources in source list -> exactly 1 citation produced!
+        sources = [
+            {"paper_id": self.paper1.id, "chunk_id": self.chunk1.id, "text": "Snippet 1"},
+            {"paper_id": self.paper1.id, "chunk_id": self.chunk1.id, "text": "Snippet 1 duplicate"},
+        ]
+        source_citations = generate_citations_from_sources(
+            sources=sources,
+            allowed_papers=[self.paper1],
+            expected_project=self.proj1,
+        )
+        self.assertEqual(len(source_citations), 1)
+
+    def test_cross_project_evidence_rejection(self):
+        """Test that cross-project evidence cannot be cited or resolved."""
+        from ai.models import ResearchEvidence
+        from ai.citations import (
+            create_citation_reference,
+            generate_citations_from_evidence,
+            resolve_citation,
+            CrossProjectCitationError,
+        )
+
+        # 1. Attempting to create a citation for project 1 using paper from project 2
+        with self.assertRaises(CrossProjectCitationError):
+            create_citation_reference(
+                paper=self.paper_other,  # Project 2
+                chunk=self.chunk_other,
+                expected_project=self.proj1,  # Project 1
+            )
+
+        # 2. Attempting to generate citations from evidence belonging to another project
+        msg_other = ResearchMessage.objects.create(
+            session=ResearchSession.objects.create(project=self.proj2, title="Other Session"),
+            role=ResearchMessage.ROLE_ASSISTANT,
+            content="Other content",
+        )
+        ev_other = ResearchEvidence.objects.create(
+            message=msg_other,
+            paper=self.paper_other,
+            chunk=self.chunk_other,
+            page_number=5,
+            text="Other text",
+        )
+
+        with self.assertRaises(CrossProjectCitationError):
+            generate_citations_from_evidence([ev_other], expected_project=self.proj1)
+
+        # 3. Attempting to resolve evidence across projects
+        with self.assertRaises(CrossProjectCitationError):
+            resolve_citation(
+                citation_ref=f"cite_p{self.paper_other.id}_c{self.chunk_other.id}",
+                evidence_items=[ev_other],
+                expected_project=self.proj1,
+            )
+
+    def test_single_paper_evidence_integration(self):
+        """Test citation representation for single-paper workflow (like ask_ai)."""
+        from ai.models import ResearchEvidence
+        from ai.citations import resolve_citations_for_message, build_citation_id
+
+        ev = ResearchEvidence.objects.create(
+            message=self.msg_assistant,
+            paper=self.paper1,
+            chunk=self.chunk1,
+            page_number=self.chunk1.page_number,
+            text=self.chunk1.text,
+        )
+
+        citations = resolve_citations_for_message(self.msg_assistant, expected_project=self.proj1)
+        self.assertEqual(len(citations), 1)
+        self.assertEqual(citations[0].citation_id, f"cite_p{self.paper1.id}_c{self.chunk1.id}")
+        self.assertEqual(citations[0].paper_title, "Paper Alpha")
+        self.assertEqual(citations[0].page_number, 3)
+
+    def test_multi_paper_evidence_integration(self):
+        """Test citation representation for multi-paper workflows (compare, gaps, thematic, trends)."""
+        from ai.models import ResearchEvidence
+        from ai.citations import resolve_citations_for_message
+
+        # Multi-paper assistant message with evidence from 3 distinct papers
+        ResearchEvidence.objects.create(
+            message=self.msg_assistant,
+            paper=self.paper1,
+            chunk=self.chunk1,
+            page_number=self.chunk1.page_number,
+            text=self.chunk1.text,
+        )
+        ResearchEvidence.objects.create(
+            message=self.msg_assistant,
+            paper=self.paper2,
+            chunk=self.chunk2,
+            page_number=self.chunk2.page_number,
+            text=self.chunk2.text,
+        )
+        ResearchEvidence.objects.create(
+            message=self.msg_assistant,
+            paper=self.paper3,
+            chunk=self.chunk3,
+            page_number=self.chunk3.page_number,
+            text=self.chunk3.text,
+        )
+
+        citations = resolve_citations_for_message(self.msg_assistant, expected_project=self.proj1)
+        self.assertEqual(len(citations), 3)
+
+        paper_ids_cited = {c.paper_id for c in citations}
+        self.assertEqual(paper_ids_cited, {self.paper1.id, self.paper2.id, self.paper3.id})
+
+    def test_evidence_model_and_serializer_citation_id(self):
+        """Test that ResearchEvidence model property and serializer expose citation_id cleanly."""
+        from ai.models import ResearchEvidence
+        from ai.serializers import ResearchEvidenceSerializer
+
+        ev = ResearchEvidence.objects.create(
+            message=self.msg_assistant,
+            paper=self.paper1,
+            chunk=self.chunk1,
+            page_number=3,
+            text=self.chunk1.text,
+        )
+
+        # Model property
+        self.assertEqual(ev.citation_id, f"cite_p{self.paper1.id}_c{self.chunk1.id}")
+
+        # Serializer representation
+        serializer = ResearchEvidenceSerializer(ev)
+        data = serializer.data
+        self.assertIn("citation_id", data)
+        self.assertEqual(data["citation_id"], f"cite_p{self.paper1.id}_c{self.chunk1.id}")
+        self.assertEqual(data["paper_id"], self.paper1.id)
+        self.assertEqual(data["chunk_id"], self.chunk1.id)
+        self.assertEqual(data["page_number"], 3)
+
+
+# ==============================================================================
+# Phase 7.5.2 — Citation Formatting & Numbering Tests
+# ==============================================================================
+
+class CitationFormattingAndNumberingTests(TestCase):
+    """
+    Phase 7.5.2 — Citation Formatting & Numbering Tests for NForge.
+
+    Validates:
+    1. First citation becomes [1]
+    2. Multiple citations get sequential numbers ([1], [2], [3])
+    3. Duplicate citation IDs are deduplicated
+    4. Ordering is deterministic
+    5. Missing page number is preserved as None
+    6. Single-paper citations
+    7. Multi-paper citations
+    8. Citation number maps back to the correct citation_id and metadata
+    9. Invalid/unresolved citations are rejected
+    10. Existing response contracts remain compatible
+    """
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+        from projects.models import Project
+        from papers.models import Paper
+        from ai.models import PaperChunk, ResearchSession, ResearchMessage, ResearchEvidence
+
+        self.user = User.objects.create_user(username="cite_user_2", email="cite2@nforge.io", password="password123")
+        self.proj1 = Project.objects.create(title="Project Alpha", owner=self.user)
+        self.proj2 = Project.objects.create(title="Project External", owner=self.user)
+
+        self.paper1 = Paper.objects.create(title="Paper Alpha", project=self.proj1)
+        self.paper2 = Paper.objects.create(title="Paper Beta", project=self.proj1)
+        self.paper3 = Paper.objects.create(title="Paper Gamma", project=self.proj1)
+        self.paper_other = Paper.objects.create(title="Paper Other", project=self.proj2)
+
+        self.chunk1_1 = PaperChunk.objects.create(paper=self.paper1, chunk_index=0, text="Intro to deep learning.", page_number=1, embedding=[0.1] * 384)
+        self.chunk1_2 = PaperChunk.objects.create(paper=self.paper1, chunk_index=1, text="Attention mechanisms overview.", page_number=3, embedding=[0.1] * 384)
+        self.chunk1_nopage = PaperChunk.objects.create(paper=self.paper1, chunk_index=2, text="Supplementary materials.", page_number=None, embedding=[0.1] * 384)
+
+        self.chunk2_1 = PaperChunk.objects.create(paper=self.paper2, chunk_index=0, text="Recurrent neural networks.", page_number=5, embedding=[0.1] * 384)
+        self.chunk3_1 = PaperChunk.objects.create(paper=self.paper3, chunk_index=0, text="Transformer architectures.", page_number=12, embedding=[0.1] * 384)
+
+        self.session = ResearchSession.objects.create(project=self.proj1, title="Citation Session")
+        self.msg_assistant = ResearchMessage.objects.create(
+            session=self.session,
+            role=ResearchMessage.ROLE_ASSISTANT,
+            content="Summary of modern architectures.",
+        )
+
+    def test_first_citation_becomes_bracket_one(self):
+        """Test that the first validated citation is numbered [1] under map key '1'."""
+        from ai.citations import (
+            format_citation_label,
+            build_citation_map,
+            get_citation_number_for_id,
+            get_citation_label_for_id,
+            build_citation_id,
+        )
+
+        # 1. format_citation_label
+        label = format_citation_label(1)
+        self.assertEqual(label, "[1]")
+
+        # 2. build_citation_map with a single source
+        cite_id = build_citation_id(self.paper1.id, self.chunk1_1.id)
+        source = {
+            "paper_id": self.paper1.id,
+            "chunk_id": self.chunk1_1.id,
+            "page_number": self.chunk1_1.page_number,
+            "paper_title": self.paper1.title,
+        }
+        citation_map = build_citation_map([source], expected_project=self.proj1)
+
+        self.assertIn("1", citation_map)
+        entry = citation_map["1"]
+        self.assertEqual(entry["citation_id"], cite_id)
+        self.assertEqual(entry["paper_id"], self.paper1.id)
+        self.assertEqual(entry["paper_title"], "Paper Alpha")
+        self.assertEqual(entry["chunk_id"], self.chunk1_1.id)
+        self.assertEqual(entry["page_number"], 1)
+        self.assertIsNone(entry["evidence_id"])
+
+        # 3. Lookup helpers
+        self.assertEqual(get_citation_number_for_id(citation_map, cite_id), 1)
+        self.assertEqual(get_citation_label_for_id(citation_map, cite_id), "[1]")
+
+    def test_multiple_citations_get_sequential_numbers(self):
+        """
+        Test that multiple distinct citations get sequential numbers:
+        cite_p1_c1 -> [1]
+        cite_p2_c1 -> [2]
+        cite_p1_c2 -> [3]
+        """
+        from ai.citations import (
+            build_citation_map,
+            build_citation_id,
+            format_citation_label,
+        )
+
+        sources = [
+            {"paper_id": self.paper1.id, "chunk_id": self.chunk1_1.id, "page_number": 1, "paper_title": self.paper1.title},
+            {"paper_id": self.paper2.id, "chunk_id": self.chunk2_1.id, "page_number": 5, "paper_title": self.paper2.title},
+            {"paper_id": self.paper1.id, "chunk_id": self.chunk1_2.id, "page_number": 3, "paper_title": self.paper1.title},
+        ]
+
+        citation_map = build_citation_map(sources, expected_project=self.proj1)
+
+        self.assertEqual(len(citation_map), 3)
+        self.assertIn("1", citation_map)
+        self.assertIn("2", citation_map)
+        self.assertIn("3", citation_map)
+
+        cid1 = build_citation_id(self.paper1.id, self.chunk1_1.id)
+        cid2 = build_citation_id(self.paper2.id, self.chunk2_1.id)
+        cid3 = build_citation_id(self.paper1.id, self.chunk1_2.id)
+
+        self.assertEqual(citation_map["1"]["citation_id"], cid1)
+        self.assertEqual(citation_map["2"]["citation_id"], cid2)
+        self.assertEqual(citation_map["3"]["citation_id"], cid3)
+
+        self.assertEqual(format_citation_label(1), "[1]")
+        self.assertEqual(format_citation_label(2), "[2]")
+        self.assertEqual(format_citation_label(3), "[3]")
+
+    def test_duplicate_citation_ids_are_deduplicated(self):
+        """
+        Test that duplicate evidence/citation IDs receive only one citation number.
+        cite_p1_c1 -> [1]
+        cite_p2_c1 -> [2]
+        cite_p1_c1 -> still [1] (no new number)
+        cite_p3_c1 -> [3]
+        """
+        from ai.citations import (
+            build_citation_map,
+            build_citation_id,
+            get_citation_number_for_id,
+        )
+
+        sources = [
+            {"paper_id": self.paper1.id, "chunk_id": self.chunk1_1.id, "page_number": 1, "paper_title": self.paper1.title},
+            {"paper_id": self.paper2.id, "chunk_id": self.chunk2_1.id, "page_number": 5, "paper_title": self.paper2.title},
+            {"paper_id": self.paper1.id, "chunk_id": self.chunk1_1.id, "page_number": 1, "paper_title": self.paper1.title, "evidence_id": 99},  # duplicate
+            {"paper_id": self.paper3.id, "chunk_id": self.chunk3_1.id, "page_number": 12, "paper_title": self.paper3.title},
+        ]
+
+        citation_map = build_citation_map(sources, expected_project=self.proj1)
+
+        # Must have exactly 3 entries, not 4
+        self.assertEqual(len(citation_map), 3)
+        self.assertEqual(set(citation_map.keys()), {"1", "2", "3"})
+
+        cid1 = build_citation_id(self.paper1.id, self.chunk1_1.id)
+        cid2 = build_citation_id(self.paper2.id, self.chunk2_1.id)
+        cid3 = build_citation_id(self.paper3.id, self.chunk3_1.id)
+
+        self.assertEqual(citation_map["1"]["citation_id"], cid1)
+        self.assertEqual(citation_map["2"]["citation_id"], cid2)
+        self.assertEqual(citation_map["3"]["citation_id"], cid3)
+
+        # Duplicate must resolve to number 1
+        self.assertEqual(get_citation_number_for_id(citation_map, cid1), 1)
+
+        # Evidence ID from duplicate occurrence should enrich the entry
+        self.assertEqual(citation_map["1"]["evidence_id"], 99)
+
+    def test_ordering_is_deterministic(self):
+        """Test that citation numbering follows first appearance order deterministically."""
+        from ai.citations import build_citation_map, build_citation_id
+
+        cid_p2 = build_citation_id(self.paper2.id, self.chunk2_1.id)
+        cid_p1 = build_citation_id(self.paper1.id, self.chunk1_1.id)
+
+        # Order A: paper 2 first
+        order_a = [
+            {"paper_id": self.paper2.id, "chunk_id": self.chunk2_1.id, "paper_title": "Paper Beta"},
+            {"paper_id": self.paper1.id, "chunk_id": self.chunk1_1.id, "paper_title": "Paper Alpha"},
+        ]
+        map_a = build_citation_map(order_a)
+        self.assertEqual(map_a["1"]["citation_id"], cid_p2)
+        self.assertEqual(map_a["2"]["citation_id"], cid_p1)
+
+        # Order B: paper 1 first
+        order_b = [
+            {"paper_id": self.paper1.id, "chunk_id": self.chunk1_1.id, "paper_title": "Paper Alpha"},
+            {"paper_id": self.paper2.id, "chunk_id": self.chunk2_1.id, "paper_title": "Paper Beta"},
+        ]
+        map_b = build_citation_map(order_b)
+        self.assertEqual(map_b["1"]["citation_id"], cid_p1)
+        self.assertEqual(map_b["2"]["citation_id"], cid_p2)
+
+    def test_missing_page_number(self):
+        """Test that citations where page_number is None are preserved as None without inventing numbers."""
+        from ai.citations import build_citation_map, build_citation_id
+
+        sources = [
+            {"paper_id": self.paper1.id, "chunk_id": self.chunk1_nopage.id, "page_number": None, "paper_title": self.paper1.title}
+        ]
+
+        citation_map = build_citation_map(sources, expected_project=self.proj1)
+
+        self.assertIn("1", citation_map)
+        self.assertIsNone(citation_map["1"]["page_number"])
+        self.assertNotEqual(citation_map["1"]["page_number"], 0)
+        self.assertNotEqual(citation_map["1"]["page_number"], 1)
+        self.assertEqual(citation_map["1"]["citation_id"], build_citation_id(self.paper1.id, self.chunk1_nopage.id))
+
+    def test_single_paper_citations(self):
+        """Test single-paper citation map creation and summary formatting."""
+        from ai.citations import (
+            build_citation_map,
+            format_citations_summary,
+            NumberedCitation,
+        )
+
+        sources = [
+            {"paper_id": self.paper1.id, "chunk_id": self.chunk1_1.id, "page_number": 1, "paper_title": "Paper Alpha", "text": "Chunk 1"},
+            {"paper_id": self.paper1.id, "chunk_id": self.chunk1_2.id, "page_number": 3, "paper_title": "Paper Alpha", "text": "Chunk 2"},
+        ]
+
+        citation_map = build_citation_map(sources, allowed_papers=[self.paper1], expected_project=self.proj1)
+        self.assertEqual(len(citation_map), 2)
+        self.assertEqual(citation_map["1"]["paper_id"], self.paper1.id)
+        self.assertEqual(citation_map["2"]["paper_id"], self.paper1.id)
+
+        # format_citations_summary
+        summary = format_citations_summary(citation_map)
+        self.assertEqual(len(summary), 2)
+        self.assertEqual(summary[0]["number"], 1)
+        self.assertEqual(summary[0]["label"], "[1]")
+        self.assertEqual(summary[1]["number"], 2)
+        self.assertEqual(summary[1]["label"], "[2]")
+
+        # NumberedCitation dataclass validation
+        nc = NumberedCitation(
+            number=1,
+            label="[1]",
+            citation_id=citation_map["1"]["citation_id"],
+            paper_id=self.paper1.id,
+            paper_title="Paper Alpha",
+            chunk_id=self.chunk1_1.id,
+            page_number=1,
+        )
+        self.assertEqual(nc.to_map_entry(), citation_map["1"])
+
+    def test_multi_paper_citations(self):
+        """Test multi-paper citation extraction and numbering from multi-paper payload."""
+        from ai.citations import (
+            build_citation_map,
+            extract_sources_from_payload,
+            build_citation_id,
+        )
+
+        payload = {
+            "comparison": {
+                "similarities": [
+                    {
+                        "statement": "Both explore neural networks.",
+                        "sources": [
+                            {"paper_id": self.paper1.id, "chunk_id": self.chunk1_1.id, "page_number": 1, "paper_title": "Paper Alpha"},
+                            {"paper_id": self.paper2.id, "chunk_id": self.chunk2_1.id, "page_number": 5, "paper_title": "Paper Beta"},
+                        ]
+                    }
+                ],
+                "differences": [
+                    {
+                        "statement": "Different architectural approaches.",
+                        "sources": [
+                            {"paper_id": self.paper3.id, "chunk_id": self.chunk3_1.id, "page_number": 12, "paper_title": "Paper Gamma"},
+                        ]
+                    }
+                ],
+                "research_gaps": [
+                    {
+                        "statement": "Scalability under large data.",
+                        "sources": [
+                            # Duplicate reference to paper 1 chunk 1
+                            {"paper_id": self.paper1.id, "chunk_id": self.chunk1_1.id, "page_number": 1, "paper_title": "Paper Alpha"},
+                        ]
+                    }
+                ]
+            }
+        }
+
+        extracted = extract_sources_from_payload(payload)
+        self.assertEqual(len(extracted), 4)
+
+        citation_map = build_citation_map(payload, expected_project=self.proj1)
+        self.assertEqual(len(citation_map), 3)
+
+        cid1 = build_citation_id(self.paper1.id, self.chunk1_1.id)
+        cid2 = build_citation_id(self.paper2.id, self.chunk2_1.id)
+        cid3 = build_citation_id(self.paper3.id, self.chunk3_1.id)
+
+        self.assertEqual(citation_map["1"]["citation_id"], cid1)
+        self.assertEqual(citation_map["2"]["citation_id"], cid2)
+        self.assertEqual(citation_map["3"]["citation_id"], cid3)
+
+    def test_citation_number_maps_back_to_correct_citation_id(self):
+        """Test bidirectional resolution between citation number, label, and citation_id."""
+        from ai.citations import (
+            build_citation_map,
+            resolve_citation_by_number,
+            get_citation_number_for_id,
+            get_citation_label_for_id,
+            build_citation_id,
+        )
+        from ai.models import ResearchEvidence
+
+        ev = ResearchEvidence.objects.create(
+            message=self.msg_assistant,
+            paper=self.paper1,
+            chunk=self.chunk1_2,
+            page_number=3,
+            text=self.chunk1_2.text,
+        )
+
+        citation_map = build_citation_map([ev], expected_project=self.proj1)
+        cid = build_citation_id(self.paper1.id, self.chunk1_2.id)
+
+        # 1. Resolve by int 1
+        entry_int = resolve_citation_by_number(citation_map, 1)
+        self.assertEqual(entry_int["citation_id"], cid)
+        self.assertEqual(entry_int["paper_id"], self.paper1.id)
+        self.assertEqual(entry_int["paper_title"], "Paper Alpha")
+        self.assertEqual(entry_int["chunk_id"], self.chunk1_2.id)
+        self.assertEqual(entry_int["page_number"], 3)
+        self.assertEqual(entry_int["evidence_id"], ev.id)
+
+        # 2. Resolve by string '1'
+        entry_str = resolve_citation_by_number(citation_map, "1")
+        self.assertEqual(entry_str["citation_id"], cid)
+
+        # 3. Resolve by bracketed '[1]'
+        entry_bracket = resolve_citation_by_number(citation_map, "[1]")
+        self.assertEqual(entry_bracket["citation_id"], cid)
+
+        # 4. Reverse lookup from citation_id to number and label
+        self.assertEqual(get_citation_number_for_id(citation_map, cid), 1)
+        self.assertEqual(get_citation_label_for_id(citation_map, cid), "[1]")
+
+    def test_invalid_unresolved_citations_are_rejected(self):
+        """Test that invalid formats, cross-project citations, and unresolved numbers raise exceptions."""
+        from ai.citations import (
+            build_citation_map,
+            resolve_citation_by_number,
+            format_citation_label,
+            parse_citation_label,
+            InvalidCitationError,
+            CrossProjectCitationError,
+            CitationResolutionError,
+        )
+
+        citation_map = {
+            "1": {
+                "citation_id": "cite_p1_c1",
+                "paper_id": 1,
+                "paper_title": "Paper Alpha",
+                "chunk_id": 1,
+                "page_number": 1,
+                "evidence_id": None,
+            }
+        }
+
+        # 1. Resolve number not in map
+        with self.assertRaises(CitationResolutionError):
+            resolve_citation_by_number(citation_map, 99)
+
+        with self.assertRaises(CitationResolutionError):
+            resolve_citation_by_number(citation_map, "[99]")
+
+        # 2. Invalid number formats
+        with self.assertRaises(InvalidCitationError):
+            resolve_citation_by_number(citation_map, "not_a_number")
+
+        with self.assertRaises(InvalidCitationError):
+            format_citation_label(0)
+
+        with self.assertRaises(InvalidCitationError):
+            format_citation_label(-5)
+
+        with self.assertRaises(InvalidCitationError):
+            format_citation_label("invalid")
+
+        with self.assertRaises(InvalidCitationError):
+            parse_citation_label("abc")
+
+        # 3. Invalid inputs to build_citation_map
+        with self.assertRaises(InvalidCitationError):
+            build_citation_map([{"paper_id": -1, "chunk_id": 1}])
+
+        with self.assertRaises(InvalidCitationError):
+            build_citation_map([{"paper_id": "invalid"}])
+
+        with self.assertRaises(InvalidCitationError):
+            build_citation_map(items=12345)
+
+        # 4. Cross-project evidence rejected
+        with self.assertRaises(CrossProjectCitationError):
+            build_citation_map(
+                [{"paper_id": self.paper_other.id, "chunk_id": 1}],
+                expected_project=self.proj1
+            )
+
+    def test_existing_response_contracts_remain_compatible(self):
+        """Test that existing AI services and endpoints preserve all legacy fields and add citation_map."""
+        from unittest.mock import patch, MagicMock
+        from ai.services import generate_ai_answer
+
+        mock_gemini = MagicMock()
+        mock_gemini.text = "Attention layers weigh input elements."
+
+        search_results = [
+            {"chunk": self.chunk1_1},
+            {"chunk": self.chunk1_2},
+        ]
+
+        with patch("ai.services._call_gemini", return_value=mock_gemini), \
+             patch("os.getenv", return_value="test-api-key"):
+            res = generate_ai_answer("What is attention?", search_results)
+
+        # Legacy fields preserved
+        self.assertIn("answer", res)
+        self.assertEqual(res["answer"], "Attention layers weigh input elements.")
+        self.assertIn("sources", res)
+        self.assertEqual(len(res["sources"]), 2)
+
+        # Additive citation fields in sources
+        for s in res["sources"]:
+            self.assertIn("source_number", s)
+            self.assertIn("chunk_id", s)
+            self.assertIn("page_number", s)
+            self.assertIn("citation_id", s)
+            self.assertIn("citation_number", s)
+            self.assertIn("citation_label", s)
+
+        self.assertEqual(res["sources"][0]["citation_number"], 1)
+        self.assertEqual(res["sources"][0]["citation_label"], "[1]")
+        self.assertEqual(res["sources"][1]["citation_number"], 2)
+        self.assertEqual(res["sources"][1]["citation_label"], "[2]")
+
+        # Top-level additive citation_map
+        self.assertIn("citation_map", res)
+        self.assertIn("1", res["citation_map"])
+        self.assertIn("2", res["citation_map"])
+        self.assertEqual(res["citation_map"]["1"]["chunk_id"], self.chunk1_1.id)
+        self.assertEqual(res["citation_map"]["2"]["chunk_id"], self.chunk1_2.id)
+
+        # Endpoint integration test with session
+        from rest_framework.test import APIClient
+        api_client = APIClient()
+        api_client.force_authenticate(user=self.user)
+        with patch("ai.services.generate_embedding", return_value=[0.1] * 384), \
+             patch("os.getenv", return_value="test-api-key"), \
+             patch("ai.services._call_gemini", return_value=mock_gemini):
+            api_resp = api_client.post("/api/ai/ask/", {
+                "paper_id": self.paper1.id,
+                "question": "What is attention?",
+                "session_id": self.session.id,
+            }, format="json")
+
+        self.assertEqual(api_resp.status_code, 200)
+        data = api_resp.json()
+        self.assertIn("answer", data)
+        self.assertIn("sources", data)
+        self.assertIn("session_id", data)
+        self.assertIn("citation_map", data)
+        self.assertIn("1", data["citation_map"])
+        # Verify evidence_id was populated upon session persistence
+        self.assertIsNotNone(data["citation_map"]["1"]["evidence_id"])
+
+
+
+
 
 
 

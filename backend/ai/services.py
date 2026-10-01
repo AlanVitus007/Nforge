@@ -450,6 +450,7 @@ def generate_ai_answer(question, search_results):
         return {
             "answer": "I could not find relevant information in this paper.",
             "sources": [],
+            "citation_map": {},
         }
 
     context_parts = []
@@ -494,23 +495,41 @@ Paper sources:
     print("[Ask AI] Making Gemini call #1 for user question")
     response = _call_gemini(client, prompt, feature_name="ask_ai")
 
+    from .citations import (
+        build_citation_id,
+        build_citation_map,
+        get_citation_number_for_id,
+        format_citation_label,
+    )
+
     sources = []
 
     for index, result in enumerate(search_results):
         chunk = result["chunk"]
-
         sources.append({
             "source_number": index + 1,
+            "citation_id": build_citation_id(chunk.paper.id, chunk.id),
+            "paper_id": chunk.paper.id,
+            "paper_title": chunk.paper.title,
             "chunk_id": chunk.id,
             "chunk_index": chunk.chunk_index,
             "page_number": chunk.page_number,
             "text": chunk.text,
         })
 
+    citation_map = build_citation_map(sources)
+
+    for src in sources:
+        cid = src.get("citation_id")
+        num = get_citation_number_for_id(citation_map, cid)
+        if num is not None:
+            src["citation_number"] = num
+            src["citation_label"] = format_citation_label(num)
 
     return {
         "answer": response.text,
         "sources": sources,
+        "citation_map": citation_map,
     }
 
 
@@ -934,7 +953,10 @@ def validate_and_resolve_source_refs(source_refs, valid_chunk_map):
             chunk = valid_chunk_map[cid]
             # Verify paper_id matches chunk.paper.id
             if pid is None or chunk.paper.id == pid:
+                from .citations import build_citation_id
+
                 resolved_sources.append({
+                    "citation_id": build_citation_id(chunk.paper.id, chunk.id),
                     "paper_id": chunk.paper.id,
                     "paper_title": chunk.paper.title,
                     "chunk_id": chunk.id,
@@ -1136,17 +1158,23 @@ Source Excerpts:
 
     print(f"[DIAGNOSTICS] Feature: multi_paper_synthesis | Gemini Calls: {gemini_call_count}")
 
+    comparison_data = {
+        "overall_synthesis": raw_parsed["overall_synthesis"],
+        "similarities": similarities,
+        "differences": differences,
+        "methodology_comparison": methodology_comp,
+        "findings_comparison": findings_comp,
+        "research_gaps": research_gaps,
+    }
+
+    from .citations import build_citation_map
+    citation_map = build_citation_map(comparison_data)
+
     return {
         "question": query_text,
         "papers": [{"paper_id": p.id, "title": p.title} for p in papers],
-        "comparison": {
-            "overall_synthesis": raw_parsed["overall_synthesis"],
-            "similarities": similarities,
-            "differences": differences,
-            "methodology_comparison": methodology_comp,
-            "findings_comparison": findings_comp,
-            "research_gaps": research_gaps,
-        },
+        "comparison": comparison_data,
+        "citation_map": citation_map,
     }
 
 
@@ -1449,10 +1477,14 @@ Source Excerpts:
         "future_research_directions": future_directions,
     }
 
+    from .citations import build_citation_map
+    citation_map = build_citation_map(gap_data)
+
     return {
         "question": query_text,
         "papers": [{"paper_id": p.id, "title": p.title} for p in papers_list],
         "gap_analysis": gap_data,
+        "citation_map": citation_map,
         **gap_data,
     }
 
@@ -1695,10 +1727,14 @@ Source Excerpts:
         "themes": validated_themes,
     }
 
+    from .citations import build_citation_map
+    citation_map = build_citation_map(thematic_data)
+
     return {
         "question": query_text,
         "papers": [{"paper_id": p.id, "title": p.title} for p in papers_list],
         "thematic_analysis": thematic_data,
+        "citation_map": citation_map,
         **thematic_data,
     }
 
@@ -2102,10 +2138,14 @@ Source Excerpts:
         "future_directions": validated_future,
     }
 
+    from .citations import build_citation_map
+    citation_map = build_citation_map(trend_data)
+
     return {
         "question": query_text,
         "papers": papers_info,
         "trend_analysis": trend_data,
+        "citation_map": citation_map,
         **trend_data,
     }
 

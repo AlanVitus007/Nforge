@@ -7,10 +7,11 @@ class ResearchEvidenceSerializer(serializers.ModelSerializer):
     paper_id = serializers.IntegerField(source="paper.id", read_only=True)
     paper_title = serializers.CharField(source="paper.title", read_only=True)
     chunk_id = serializers.SerializerMethodField()
+    citation_id = serializers.CharField(read_only=True)
 
     class Meta:
         model = ResearchEvidence
-        fields = ("id", "paper_id", "paper_title", "chunk_id", "page_number", "text")
+        fields = ("id", "paper_id", "paper_title", "chunk_id", "page_number", "text", "citation_id")
 
     def get_chunk_id(self, obj):
         return obj.chunk_id

@@ -96,3 +96,8 @@ class ResearchEvidence(models.Model):
 
     def __str__(self):
         return f"Evidence for Message #{self.message.id} ({self.paper.title})"
+
+    @property
+    def citation_id(self):
+        from .citations import build_citation_id
+        return build_citation_id(self.paper_id, self.chunk_id)
