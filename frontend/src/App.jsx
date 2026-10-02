@@ -19,6 +19,7 @@ import AdminUsers from './pages/AdminUsers';
 import AdminProjects from './pages/AdminProjects';
 import AdminPapers from './pages/AdminPapers';
 import AdminActivity from './pages/AdminActivity';
+import AdminAIUsage from './pages/AdminAIUsage';
 import './App.css';
 
 function HomeRoute() {
@@ -90,6 +91,14 @@ function App() {
                 element={
                   <AdminRoute>
                     <AdminActivity />
+                  </AdminRoute>
+                }
+              />
+              <Route
+                path="/admin/ai-usage"
+                element={
+                  <AdminRoute>
+                    <AdminAIUsage />
                   </AdminRoute>
                 }
               />

@@ -1,3 +1,4 @@
+import json
 from django.contrib.auth.models import User
 from django.test import TestCase
 from rest_framework import status
@@ -1311,6 +1312,340 @@ class AdminActivityOverviewAPITests(TestCase):
         # Papers
         res_papers = self.client.get("/api/admin/papers/")
         self.assertEqual(res_papers.status_code, status.HTTP_200_OK)
+
+
+class AdminAIUsageAPITests(TestCase):
+    """
+    Focused tests for Phase 8.5.2 Admin AI Usage Monitoring.
+    Validates permissions, aggregation, filtering, pagination,
+    sensitive content exclusion, and non-regression.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+        self.url = "/api/admin/ai-usage/"
+
+        # Users
+        self.superuser = User.objects.create_superuser(
+            username="ai_admin_super",
+            password="password123",
+            email="ai_super@example.com",
+        )
+        self.staff_admin = User.objects.create_user(
+            username="ai_admin_staff",
+            password="password123",
+            email="ai_staff@example.com",
+            is_staff=True,
+        )
+        self.project_owner = User.objects.create_user(
+            username="ai_owner_user",
+            password="password123",
+            email="ai_owner@example.com",
+        )
+        self.editor = User.objects.create_user(
+            username="ai_editor_user",
+            password="password123",
+            email="ai_editor@example.com",
+        )
+        self.viewer = User.objects.create_user(
+            username="ai_viewer_user",
+            password="password123",
+            email="ai_viewer@example.com",
+        )
+        self.normal_user = User.objects.create_user(
+            username="ai_normal_user",
+            password="password123",
+            email="ai_normal@example.com",
+        )
+
+        # Projects
+        self.project1 = Project.objects.create(
+            owner=self.project_owner,
+            title="Genomics Neural Nets",
+            description="Deep learning for genomics variant inference.",
+        )
+        self.project2 = Project.objects.create(
+            owner=self.normal_user,
+            title="Quantum Photonic Networks",
+            description="Photonic circuit modeling.",
+        )
+
+        # Memberships
+        ProjectMember.objects.create(
+            project=self.project1, user=self.editor, role=ProjectMember.ROLE_EDITOR
+        )
+        ProjectMember.objects.create(
+            project=self.project1, user=self.viewer, role=ProjectMember.ROLE_VIEWER
+        )
+
+        # Papers
+        self.paper1 = Paper.objects.create(
+            project=self.project1,
+            title="Variant Calling via Transformers",
+            file="papers/variant.pdf",
+            extracted_text="CONFIDENTIAL_GENOMIC_PAPER_TEXT_DO_NOT_EXPOSE",
+        )
+        self.paper2 = Paper.objects.create(
+            project=self.project2,
+            title="Integrated Quantum Photonics",
+            file="papers/photonics.pdf",
+            extracted_text="CONFIDENTIAL_PHOTONIC_PAPER_TEXT_DO_NOT_EXPOSE",
+        )
+
+        # Sessions
+        self.session1 = ResearchSession.objects.create(
+            project=self.project1,
+            title="Variant Calling Benchmark",
+        )
+        self.session2 = ResearchSession.objects.create(
+            project=self.project2,
+            title="Photonic Waveguide Study",
+        )
+
+        # AI Messages in Project 1
+        # 1. Ask AI (Q&A)
+        self.msg_qna = ResearchMessage.objects.create(
+            session=self.session1,
+            role=ResearchMessage.ROLE_ASSISTANT,
+            content="The model achieves high F1 score on indel detection.",
+        )
+        ResearchEvidence.objects.create(
+            message=self.msg_qna,
+            paper=self.paper1,
+            text="CONFIDENTIAL_EVIDENCE_EXCERPT_ONE",
+        )
+
+        # 2. Research Gap Analysis
+        gap_content = json.dumps({
+            "common_limitations": ["Limited dataset for rare variants"],
+            "methodological_gaps": ["Requires high compute cluster"],
+            "dataset_population_gaps": ["European ancestry bias"],
+        })
+        self.msg_gap = ResearchMessage.objects.create(
+            session=self.session1,
+            role=ResearchMessage.ROLE_ASSISTANT,
+            content=gap_content,
+        )
+
+        # 3. Paper Comparison
+        compare_content = json.dumps({
+            "similarities": ["Both evaluate precision on benchmarks"],
+            "differences": ["Paper A uses CNN, Paper B uses Transformer"],
+            "methodology_comparison": ["Different loss functions"],
+        })
+        self.msg_compare = ResearchMessage.objects.create(
+            session=self.session1,
+            role=ResearchMessage.ROLE_ASSISTANT,
+            content=compare_content,
+        )
+
+        # 4. Thematic Analysis
+        thematic_content = json.dumps({
+            "themes": [{"title": "Algorithmic Efficiency", "description": "Scaling laws"}]
+        })
+        self.msg_thematic = ResearchMessage.objects.create(
+            session=self.session1,
+            role=ResearchMessage.ROLE_ASSISTANT,
+            content=thematic_content,
+        )
+
+        # 5. Trend Analysis
+        trend_content = json.dumps({
+            "research_evolution": [{"stage": "Foundational Phase", "year": "2022"}]
+        })
+        self.msg_trend = ResearchMessage.objects.create(
+            session=self.session1,
+            role=ResearchMessage.ROLE_ASSISTANT,
+            content=trend_content,
+        )
+
+        # 6. User prompt message (not an assistant response)
+        self.msg_user = ResearchMessage.objects.create(
+            session=self.session1,
+            role=ResearchMessage.ROLE_USER,
+            content="CONFIDENTIAL_USER_PROMPT_DO_NOT_EXPOSE",
+        )
+
+        # 7. AI Message in Project 2 (Q&A)
+        self.msg_project2 = ResearchMessage.objects.create(
+            session=self.session2,
+            role=ResearchMessage.ROLE_ASSISTANT,
+            content="Waveguide transmission loss was measured at 0.1 dB/cm.",
+        )
+
+    def test_admin_receives_200(self):
+        """Staff and superuser receive 200 with AI usage monitoring data."""
+        self.client.force_authenticate(user=self.staff_admin)
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertIn("total_ai_activity", res.data)
+        self.assertIn("operations_breakdown", res.data)
+        self.assertIn("by_operation", res.data)
+        self.assertIn("by_user", res.data)
+        self.assertIn("by_project", res.data)
+        self.assertIn("recent_activity", res.data)
+        self.assertIn("results", res.data)
+        self.assertIn("count", res.data)
+
+        # Superuser verification
+        self.client.force_authenticate(user=self.superuser)
+        res_super = self.client.get(self.url)
+        self.assertEqual(res_super.status_code, status.HTTP_200_OK)
+
+    def test_unauthenticated_receives_401(self):
+        """Unauthenticated requests are rejected with 401."""
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_normal_users_owners_editors_viewers_receive_403(self):
+        """Non-admin users (normal, owner, editor, viewer) receive 403."""
+        for u in [self.normal_user, self.project_owner, self.editor, self.viewer]:
+            self.client.force_authenticate(user=u)
+            res = self.client.get(self.url)
+            self.assertEqual(
+                res.status_code,
+                status.HTTP_403_FORBIDDEN,
+                f"User {u.username} should have received 403",
+            )
+
+    def test_aggregation_correctness(self):
+        """AI usage aggregates match exact database records."""
+        self.client.force_authenticate(user=self.staff_admin)
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+        # 6 assistant messages in total
+        self.assertEqual(res.data["total_ai_activity"], 6)
+
+        by_op = res.data["by_operation"]
+        self.assertEqual(by_op["GAP_ANALYSIS"], 1)
+        self.assertEqual(by_op["COMPARE_PAPERS"], 1)
+        self.assertEqual(by_op["THEMATIC_ANALYSIS"], 1)
+        self.assertEqual(by_op["RESEARCH_TRENDS"], 1)
+        self.assertEqual(by_op["ASK_AI"], 2)
+
+        # Verify operations_breakdown matches
+        total_from_breakdown = sum(item["count"] for item in res.data["operations_breakdown"])
+        self.assertEqual(total_from_breakdown, 6)
+
+        # Verify by_user contains project_owner (5) and normal_user (1)
+        user_counts = {u["username"]: u["count"] for u in res.data["by_user"]}
+        self.assertEqual(user_counts.get("ai_owner_user"), 5)
+        self.assertEqual(user_counts.get("ai_normal_user"), 1)
+
+        # Verify by_project contains project 1 (5) and project 2 (1)
+        proj_counts = {p["project_title"]: p["count"] for p in res.data["by_project"]}
+        self.assertEqual(proj_counts.get("Genomics Neural Nets"), 5)
+        self.assertEqual(proj_counts.get("Quantum Photonic Networks"), 1)
+
+    def test_operation_filtering(self):
+        """Querying ?operation= filters activity log correctly."""
+        self.client.force_authenticate(user=self.staff_admin)
+
+        # Filter GAP_ANALYSIS
+        res_gap = self.client.get(self.url, {"operation": "GAP_ANALYSIS"})
+        self.assertEqual(res_gap.status_code, status.HTTP_200_OK)
+        self.assertEqual(res_gap.data["count"], 1)
+        self.assertEqual(res_gap.data["results"][0]["operation"], "GAP_ANALYSIS")
+
+        # Filter COMPARE_PAPERS
+        res_comp = self.client.get(self.url, {"operation": "COMPARE_PAPERS"})
+        self.assertEqual(res_comp.status_code, status.HTTP_200_OK)
+        self.assertEqual(res_comp.data["count"], 1)
+        self.assertEqual(res_comp.data["results"][0]["operation"], "COMPARE_PAPERS")
+
+        # Filter ASK_AI
+        res_qna = self.client.get(self.url, {"operation": "ASK_AI"})
+        self.assertEqual(res_qna.status_code, status.HTTP_200_OK)
+        self.assertEqual(res_qna.data["count"], 2)
+        for item in res_qna.data["results"]:
+            self.assertEqual(item["operation"], "ASK_AI")
+
+    def test_project_and_user_filtering(self):
+        """Querying ?project_id= and ?user_id= filters records accurately."""
+        self.client.force_authenticate(user=self.staff_admin)
+
+        # Project 2 only
+        res_proj = self.client.get(self.url, {"project_id": self.project2.id})
+        self.assertEqual(res_proj.status_code, status.HTTP_200_OK)
+        self.assertEqual(res_proj.data["count"], 1)
+        self.assertEqual(res_proj.data["results"][0]["project_id"], self.project2.id)
+
+        # User 1 only
+        res_user = self.client.get(self.url, {"user_id": self.project_owner.id})
+        self.assertEqual(res_user.status_code, status.HTTP_200_OK)
+        self.assertEqual(res_user.data["count"], 5)
+
+    def test_pagination(self):
+        """Pagination returns expected chunking, next/previous links, and count."""
+        # Create 12 more assistant messages to exceed page_size=10
+        for i in range(12):
+            ResearchMessage.objects.create(
+                session=self.session1,
+                role=ResearchMessage.ROLE_ASSISTANT,
+                content=f"Pagination test answer #{i}",
+            )
+
+        self.client.force_authenticate(user=self.staff_admin)
+        res = self.client.get(self.url, {"page": 1, "page_size": 10})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["count"], 18)
+        self.assertEqual(len(res.data["results"]), 10)
+        self.assertEqual(res.data["total_pages"], 2)
+        self.assertEqual(res.data["current_page"], 1)
+        self.assertIsNotNone(res.data["next"])
+        self.assertIsNone(res.data["previous"])
+
+        # Page 2
+        res2 = self.client.get(self.url, {"page": 2, "page_size": 10})
+        self.assertEqual(res2.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(res2.data["results"]), 8)
+        self.assertEqual(res2.data["current_page"], 2)
+        self.assertIsNone(res2.data["next"])
+        self.assertIsNotNone(res2.data["previous"])
+
+    def test_sensitive_content_exclusion(self):
+        """Prompts, message contents, extracted texts, and credentials are never exposed."""
+        self.client.force_authenticate(user=self.staff_admin)
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+        payload_str = str(res.data)
+        self.assertNotIn("CONFIDENTIAL_USER_PROMPT_DO_NOT_EXPOSE", payload_str)
+        self.assertNotIn("The model achieves high F1 score on indel detection.", payload_str)
+        self.assertNotIn("CONFIDENTIAL_GENOMIC_PAPER_TEXT_DO_NOT_EXPOSE", payload_str)
+        self.assertNotIn("CONFIDENTIAL_PHOTONIC_PAPER_TEXT_DO_NOT_EXPOSE", payload_str)
+        self.assertNotIn("CONFIDENTIAL_EVIDENCE_EXCERPT_ONE", payload_str)
+        self.assertNotIn("password", payload_str.lower())
+        self.assertNotIn("auth_token", payload_str.lower())
+
+        # Verify no item has a 'content' field
+        for item in res.data["results"]:
+            self.assertNotIn("content", item)
+            self.assertNotIn("text", item)
+
+    def test_existing_ai_and_admin_endpoints_unaffected(self):
+        """Existing AI health endpoint and earlier admin endpoints remain intact."""
+        self.client.force_authenticate(user=self.staff_admin)
+
+        # AI health
+        res_ai_health = self.client.get("/api/ai/health/")
+        self.assertEqual(res_ai_health.status_code, status.HTTP_200_OK)
+
+        # Admin dashboard
+        res_dash = self.client.get("/api/admin/dashboard/")
+        self.assertEqual(res_dash.status_code, status.HTTP_200_OK)
+
+        # Admin activity
+        res_act = self.client.get("/api/admin/activity/")
+        self.assertEqual(res_act.status_code, status.HTTP_200_OK)
+
+        # Admin users & papers
+        res_users = self.client.get("/api/admin/users/")
+        self.assertEqual(res_users.status_code, status.HTTP_200_OK)
+        res_papers = self.client.get("/api/admin/papers/")
+        self.assertEqual(res_papers.status_code, status.HTTP_200_OK)
+
 
 
 

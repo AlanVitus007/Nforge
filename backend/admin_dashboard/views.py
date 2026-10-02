@@ -8,6 +8,7 @@ from rest_framework.views import APIView
 
 from admin_dashboard.permissions import IsNForgeAdmin
 from admin_dashboard.serializers import (
+    AdminAIUsageItemSerializer,
     AdminPaperChunkSummarySerializer,
     AdminPaperDetailSerializer,
     AdminPaperListSerializer,
@@ -66,6 +67,7 @@ class AdminPagination(PageNumberPagination):
 AdminUserPagination = AdminPagination
 AdminProjectPagination = AdminPagination
 AdminPaperPagination = AdminPagination
+AdminAIUsagePagination = AdminPagination
 
 
 
@@ -388,6 +390,215 @@ class AdminActivityOverviewView(APIView):
         }
 
         return Response(data)
+
+
+class AdminAIUsageView(APIView):
+    """
+    Read-only AI usage monitoring endpoint for NForge administrators.
+    Provides aggregate stats, operation breakdown, user/project breakdown,
+    and paginated/recent activity logs with strict exclusion of sensitive content.
+    """
+    permission_classes = [IsAuthenticated, IsNForgeAdmin]
+
+    def get(self, request):
+        base_assistant_qs = ResearchMessage.objects.filter(role=ResearchMessage.ROLE_ASSISTANT)
+
+        # 1. Platform-wide AI usage aggregates
+        total_ai_activity = base_assistant_qs.count()
+        total_sessions = ResearchSession.objects.filter(
+            messages__role=ResearchMessage.ROLE_ASSISTANT
+        ).distinct().count()
+
+        # Breakdown by operation
+        gap_count = base_assistant_qs.filter(
+            Q(content__icontains='"common_limitations"') |
+            Q(content__icontains='"methodological_gaps"') |
+            Q(content__icontains='"gap_analysis"')
+        ).count()
+
+        compare_count = base_assistant_qs.filter(
+            Q(content__icontains='"similarities"') |
+            Q(content__icontains='"differences"') |
+            Q(content__icontains='"methodology_comparison"')
+        ).count()
+
+        thematic_count = base_assistant_qs.filter(
+            Q(content__icontains='"themes"')
+        ).count()
+
+        trend_count = base_assistant_qs.filter(
+            Q(content__icontains='"research_evolution"') |
+            Q(content__icontains='"methodological_shifts"')
+        ).count()
+
+        ask_ai_count = max(0, total_ai_activity - (gap_count + compare_count + thematic_count + trend_count))
+
+        operations_breakdown = [
+            {"operation": "ASK_AI", "label": "Paper Q&A", "count": ask_ai_count},
+            {"operation": "COMPARE_PAPERS", "label": "Paper Comparison", "count": compare_count},
+            {"operation": "GAP_ANALYSIS", "label": "Research Gap Analysis", "count": gap_count},
+            {"operation": "THEMATIC_ANALYSIS", "label": "Thematic Analysis", "count": thematic_count},
+            {"operation": "RESEARCH_TRENDS", "label": "Research Trend Analysis", "count": trend_count},
+        ]
+        by_operation = {item["operation"]: item["count"] for item in operations_breakdown}
+
+        # Activity by user (top 10 project owners)
+        user_breakdown = (
+            base_assistant_qs.values(
+                'session__project__owner__id',
+                'session__project__owner__username',
+            )
+            .annotate(count=Count('id'))
+            .order_by('-count')[:10]
+        )
+        by_user = [
+            {
+                "user_id": item['session__project__owner__id'],
+                "username": item['session__project__owner__username'],
+                "count": item['count'],
+            }
+            for item in user_breakdown
+            if item['session__project__owner__id'] is not None
+        ]
+
+        # Activity by project (top 10 projects)
+        project_breakdown = (
+            base_assistant_qs.values(
+                'session__project__id',
+                'session__project__title',
+            )
+            .annotate(count=Count('id'))
+            .order_by('-count')[:10]
+        )
+        by_project = [
+            {
+                "project_id": item['session__project__id'],
+                "project_title": item['session__project__title'],
+                "count": item['count'],
+            }
+            for item in project_breakdown
+            if item['session__project__id'] is not None
+        ]
+
+        # 2. Filterable activity log queryset
+        log_qs = base_assistant_qs.select_related(
+            'session',
+            'session__project',
+            'session__project__owner',
+        ).prefetch_related('evidence').order_by('-created_at')
+
+        # Filter by operation
+        op_param = request.query_params.get('operation')
+        if op_param:
+            op_key = op_param.strip().upper().replace('-', '_')
+            if op_key == "GAP_ANALYSIS":
+                log_qs = log_qs.filter(
+                    Q(content__icontains='"common_limitations"') |
+                    Q(content__icontains='"methodological_gaps"') |
+                    Q(content__icontains='"gap_analysis"')
+                )
+            elif op_key in ("COMPARE_PAPERS", "COMPARE"):
+                log_qs = log_qs.filter(
+                    Q(content__icontains='"similarities"') |
+                    Q(content__icontains='"differences"') |
+                    Q(content__icontains='"methodology_comparison"')
+                )
+            elif op_key == "THEMATIC_ANALYSIS":
+                log_qs = log_qs.filter(Q(content__icontains='"themes"'))
+            elif op_key in ("RESEARCH_TRENDS", "TRENDS", "TREND_ANALYSIS"):
+                log_qs = log_qs.filter(
+                    Q(content__icontains='"research_evolution"') |
+                    Q(content__icontains='"methodological_shifts"')
+                )
+            elif op_key in ("ASK_AI", "QNA", "ASK"):
+                log_qs = log_qs.exclude(
+                    Q(content__icontains='"common_limitations"') |
+                    Q(content__icontains='"methodological_gaps"') |
+                    Q(content__icontains='"gap_analysis"') |
+                    Q(content__icontains='"similarities"') |
+                    Q(content__icontains='"differences"') |
+                    Q(content__icontains='"methodology_comparison"') |
+                    Q(content__icontains='"themes"') |
+                    Q(content__icontains='"research_evolution"') |
+                    Q(content__icontains='"methodological_shifts"')
+                )
+
+        # Filter by project_id
+        project_id_param = request.query_params.get('project_id')
+        if project_id_param:
+            try:
+                log_qs = log_qs.filter(session__project_id=int(project_id_param))
+            except (ValueError, TypeError):
+                pass
+
+        # Filter by user_id
+        user_id_param = request.query_params.get('user_id')
+        if user_id_param:
+            try:
+                log_qs = log_qs.filter(session__project__owner_id=int(user_id_param))
+            except (ValueError, TypeError):
+                pass
+
+        # Filter by search (matches session title, project title, or owner username)
+        search_param = request.query_params.get('search') or request.query_params.get('q')
+        if search_param:
+            search_param = search_param.strip()
+            log_qs = log_qs.filter(
+                Q(session__title__icontains=search_param) |
+                Q(session__project__title__icontains=search_param) |
+                Q(session__project__owner__username__icontains=search_param)
+            )
+
+        # Recent activity (top 5 most recent across the platform)
+        recent_qs = base_assistant_qs.select_related(
+            'session',
+            'session__project',
+            'session__project__owner',
+        ).prefetch_related('evidence').order_by('-created_at')[:5]
+        recent_activity_data = AdminAIUsageItemSerializer(recent_qs, many=True).data
+
+        # Paginate results
+        paginator = AdminAIUsagePagination()
+        page = paginator.paginate_queryset(log_qs, request, view=self)
+
+        if page is not None:
+            serializer = AdminAIUsageItemSerializer(page, many=True)
+            page_data = serializer.data
+            return Response({
+                "total_ai_activity": total_ai_activity,
+                "total_activity": total_ai_activity,
+                "total_sessions": total_sessions,
+                "operations_breakdown": operations_breakdown,
+                "by_operation": by_operation,
+                "by_user": by_user,
+                "by_project": by_project,
+                "recent_activity": recent_activity_data,
+                "count": paginator.page.paginator.count,
+                "total_pages": paginator.page.paginator.num_pages,
+                "current_page": paginator.page.number,
+                "next": paginator.get_next_link(),
+                "previous": paginator.get_previous_link(),
+                "results": page_data,
+            })
+
+        serializer = AdminAIUsageItemSerializer(log_qs, many=True)
+        return Response({
+            "total_ai_activity": total_ai_activity,
+            "total_activity": total_ai_activity,
+            "total_sessions": total_sessions,
+            "operations_breakdown": operations_breakdown,
+            "by_operation": by_operation,
+            "by_user": by_user,
+            "by_project": by_project,
+            "recent_activity": recent_activity_data,
+            "count": log_qs.count(),
+            "total_pages": 1,
+            "current_page": 1,
+            "next": None,
+            "previous": None,
+            "results": serializer.data,
+        })
+
 
 
 

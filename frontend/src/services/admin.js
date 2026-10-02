@@ -40,5 +40,10 @@ export const getAdminActivity = async () => {
   return response.data;
 };
 
+export const getAdminAIUsage = async (params = {}) => {
+  const response = await api.get('/admin/ai-usage/', { params });
+  return response.data;
+};
+
 
 

@@ -12,6 +12,7 @@ const AdminSidebar = ({ activeTab }) => {
     { id: 'projects', label: 'Projects', icon: '📁', path: '/admin/projects', isPlaceholder: false },
     { id: 'papers', label: 'Papers', icon: '📄', path: '/admin/papers', isPlaceholder: false },
     { id: 'activity', label: 'Activity', icon: '⚡', path: '/admin/activity', isPlaceholder: false },
+    { id: 'ai-usage', label: 'AI Usage', icon: '🤖', path: '/admin/ai-usage', isPlaceholder: false },
   ];
 
   return (

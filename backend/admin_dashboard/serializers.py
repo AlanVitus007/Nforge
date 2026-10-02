@@ -1,7 +1,8 @@
+import json
 from django.contrib.auth.models import User
 from rest_framework import serializers
 
-from ai.models import PaperChunk, ResearchSession
+from ai.models import PaperChunk, ResearchMessage, ResearchSession
 from papers.models import Paper
 from projects.models import Project
 
@@ -243,6 +244,112 @@ class AdminRecentResearchSessionSerializer(serializers.ModelSerializer):
             'message_count',
         ]
         read_only_fields = fields
+
+
+def classify_operation(content):
+    """
+    Classify AI operation type and human-readable label from ResearchMessage content
+    without exposing the actual content.
+    """
+    if not content:
+        return "ASK_AI", "Paper Q&A"
+
+    text = content.strip()
+    if text.startswith("{") and text.endswith("}"):
+        try:
+            data = json.loads(text)
+            if isinstance(data, dict):
+                if any(k in data for k in [
+                    "common_limitations", "methodological_gaps", "dataset_population_gaps",
+                    "understudied_areas", "unanswered_research_questions", "future_research_directions",
+                    "contradictions_inconsistencies", "gap_analysis"
+                ]):
+                    return "GAP_ANALYSIS", "Research Gap Analysis"
+                if any(k in data for k in [
+                    "similarities", "differences", "methodology_comparison",
+                    "findings_comparison", "research_gaps", "comparison"
+                ]):
+                    return "COMPARE_PAPERS", "Paper Comparison"
+                if "themes" in data or "thematic_analysis" in data:
+                    return "THEMATIC_ANALYSIS", "Thematic Analysis"
+                if any(k in data for k in [
+                    "research_evolution", "methodological_shifts", "trend_analysis"
+                ]):
+                    return "RESEARCH_TRENDS", "Research Trend Analysis"
+        except Exception:
+            pass
+
+    # Quick substring check fallback
+    if '"common_limitations"' in text or '"methodological_gaps"' in text or '"gap_analysis"' in text:
+        return "GAP_ANALYSIS", "Research Gap Analysis"
+    if '"similarities"' in text or '"differences"' in text or '"methodology_comparison"' in text:
+        return "COMPARE_PAPERS", "Paper Comparison"
+    if '"themes"' in text:
+        return "THEMATIC_ANALYSIS", "Thematic Analysis"
+    if '"research_evolution"' in text or '"methodological_shifts"' in text:
+        return "RESEARCH_TRENDS", "Research Trend Analysis"
+
+    return "ASK_AI", "Paper Q&A"
+
+
+class AdminAIUsageItemSerializer(serializers.ModelSerializer):
+    """
+    Safe serializer for AI activity log items without exposing user prompts,
+    assistant answers, message content, extracted text, or embeddings.
+    """
+    session_id = serializers.IntegerField(source='session.id', read_only=True)
+    session_title = serializers.CharField(source='session.title', read_only=True)
+    project_id = serializers.IntegerField(source='session.project.id', read_only=True)
+    project_title = serializers.CharField(source='session.project.title', read_only=True)
+    user_id = serializers.IntegerField(source='session.project.owner.id', read_only=True)
+    username = serializers.CharField(source='session.project.owner.username', read_only=True)
+    operation = serializers.SerializerMethodField()
+    operation_name = serializers.SerializerMethodField()
+    evidence_count = serializers.SerializerMethodField()
+    has_evidence = serializers.SerializerMethodField()
+    status = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ResearchMessage
+        fields = [
+            'id',
+            'session_id',
+            'session_title',
+            'project_id',
+            'project_title',
+            'user_id',
+            'username',
+            'role',
+            'operation',
+            'operation_name',
+            'evidence_count',
+            'has_evidence',
+            'status',
+            'created_at',
+        ]
+        read_only_fields = fields
+
+    def get_operation(self, obj):
+        op_code, _ = classify_operation(obj.content)
+        return op_code
+
+    def get_operation_name(self, obj):
+        _, op_name = classify_operation(obj.content)
+        return op_name
+
+    def get_evidence_count(self, obj):
+        if hasattr(obj, '_prefetched_objects_cache') and 'evidence' in obj._prefetched_objects_cache:
+            return len(obj.evidence.all())
+        return obj.evidence.count()
+
+    def get_has_evidence(self, obj):
+        if hasattr(obj, '_prefetched_objects_cache') and 'evidence' in obj._prefetched_objects_cache:
+            return len(obj.evidence.all()) > 0
+        return obj.evidence.exists()
+
+    def get_status(self, obj):
+        return "SUCCESS"
+
 
 
 
