@@ -121,10 +121,11 @@ const SINGLE_PAPER_SHORTCUTS = [
         label: 'Identify limitations',
         prompt: 'Identify the main limitations acknowledged or evident from this paper.'
     },
-    {
-        label: 'Find research gaps',
-        prompt: 'Identify research gaps suggested by this paper.'
-    },
+    // Temporarily hidden: Research Gap shortcut button
+    // {
+    //     label: 'Find research gaps',
+    //     prompt: 'Identify research gaps suggested by this paper.'
+    // },
     {
         label: 'Suggest future research directions',
         prompt: 'Suggest possible future research directions based on the gaps and limitations discussed in this paper.'
@@ -216,10 +217,11 @@ const COMPARISON_SHORTCUTS = [
         label: 'Compare limitations',
         prompt: 'Compare the limitations identified in these papers.'
     },
-    {
-        label: 'Compare research gaps',
-        prompt: 'Compare the research gaps identified or implied by these papers.'
-    },
+    // Temporarily hidden: Research Gap shortcut button
+    // {
+    //     label: 'Compare research gaps',
+    //     prompt: 'Compare the research gaps identified or implied by these papers.'
+    // },
     {
         label: 'Compare study design',
         prompt: 'Compare the study designs, datasets, and evaluation approaches used in these papers.'
@@ -2832,25 +2834,7 @@ function ResearchWorkspace() {
                                                     <span className="mode-tab-badge">2–4</span>
                                                 )}
                                             </button>
-                                            <button
-                                                type="button"
-                                                className={`chat-mode-tab ${chatMode === 'gap' ? 'active' : ''}`}
-                                                onClick={() => setChatMode('gap')}
-                                                disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend || !hasAtLeastTwoPapers}
-                                                title={!hasAtLeastTwoPapers ? 'Add at least 2 papers to analyze gaps' : 'Identify research gaps across 2 to 4 papers'}
-                                            >
-                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                    <circle cx="12" cy="12" r="10"></circle>
-                                                    <line x1="12" y1="8" x2="12" y2="12"></line>
-                                                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
-                                                </svg>
-                                                Research Gaps
-                                                {!hasAtLeastTwoPapers ? (
-                                                    <span className="mode-tab-badge disabled">Requires 2+ papers</span>
-                                                ) : (
-                                                    <span className="mode-tab-badge">2–4</span>
-                                                )}
-                                            </button>
+                                            {/* Temporarily hidden: Research Gaps mode tab */}
                                             <button
                                                 type="button"
                                                 className={`chat-mode-tab ${chatMode === 'thematic' ? 'active' : ''}`}
@@ -3075,7 +3059,7 @@ function ResearchWorkspace() {
                                             </>
                                         )}
 
-                                        {/* MODE 3: Multi-Paper Research Gap Analysis */}
+                                        {/* MODE 3: Multi-Paper Research Gap Analysis (mode tab is hidden from selector) */}
                                         {chatMode === 'gap' && (
                                             <>
                                                 {/* Select 2-4 Papers for Research Gap Analysis */}
@@ -3114,8 +3098,8 @@ function ResearchWorkspace() {
                                                     </div>
                                                 </div>
 
-                                                {/* Research Prompt Shortcuts for Research Gap Analysis */}
-                                                <div className="prompt-shortcuts-row">
+                                                {/* Research Prompt Shortcuts for Research Gap Analysis (temporarily hidden) */}
+                                                <div className="prompt-shortcuts-row" style={{ display: 'none' }}>
                                                     <span className="prompt-shortcuts-label">
                                                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ opacity: 0.75 }}>
                                                             <circle cx="12" cy="12" r="10"></circle>
