@@ -92,6 +92,15 @@
   color: var(--accent-primary-hover);
 }
 
+.admin-nav-link {
+  color: var(--accent-secondary);
+  font-weight: 600;
+}
+
+.admin-nav-link:hover {
+  color: var(--accent-primary);
+}
+
 .main-content {
   flex: 1;
   padding-top: 2rem;

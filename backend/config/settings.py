@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     'projects',
     'papers',
     'ai',
+    'admin_dashboard',
 ]
 
 REST_FRAMEWORK = {

@@ -13,6 +13,8 @@ import { AuthProvider, AuthContext } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import Layout from './components/Layout';
 import Landing from './pages/Landing';
+import AdminRoute from './components/AdminRoute';
+import AdminDashboard from './pages/AdminDashboard';
 import './App.css';
 
 function HomeRoute() {
@@ -46,6 +48,14 @@ function App() {
               <Route
                 path="/projects/:projectId/papers/:paperId"
                 element={<PaperDetails />}
+              />
+              <Route
+                path="/admin"
+                element={
+                  <AdminRoute>
+                    <AdminDashboard />
+                  </AdminRoute>
+                }
               />
             </Routes>
           </Layout>

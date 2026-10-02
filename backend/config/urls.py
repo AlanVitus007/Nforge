@@ -11,6 +11,7 @@ urlpatterns = [
     path('api/projects/', include('projects.urls')),
     path('api/projects/<int:project_id>/papers/', include('papers.urls')),
     path('api/ai/', include('ai.urls')),
+    path('api/admin/', include('admin_dashboard.urls')),
 ]
 
 if settings.DEBUG:

@@ -46,6 +46,11 @@ const Layout = ({ children }) => {
             </button>
             {user ? (
               <div className="user-menu">
+                {Boolean(user.is_staff || user.is_superuser) && (
+                  <Link to="/admin" className="nav-link admin-nav-link">
+                    Admin
+                  </Link>
+                )}
                 <Link to="/dashboard" className="nav-link dashboard-link">Dashboard</Link>
                 <Button variant="secondary" onClick={handleLogout} className="logout-btn">
                   Logout
