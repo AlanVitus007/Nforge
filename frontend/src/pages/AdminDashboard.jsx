@@ -2,6 +2,7 @@ import React, { useContext, useEffect, useState, useCallback } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { getAdminDashboardStats } from '../services/admin';
 import Button from '../components/Button';
+import AdminSidebar from '../components/AdminSidebar';
 import './AdminDashboard.css';
 
 const AdminDashboard = () => {
@@ -12,7 +13,6 @@ const AdminDashboard = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [lastUpdated, setLastUpdated] = useState(null);
-  const [activeTab, setActiveTab] = useState('dashboard');
 
   const fetchStats = useCallback(async (isRefresh = false) => {
     try {
@@ -127,13 +127,6 @@ const AdminDashboard = () => {
     },
   ];
 
-  const sidebarNavItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: '📊', isPlaceholder: false },
-    { id: 'users', label: 'Users', icon: '👥', isPlaceholder: true, tag: 'Coming Soon' },
-    { id: 'projects', label: 'Projects', icon: '📁', isPlaceholder: true, tag: 'Coming Soon' },
-    { id: 'papers', label: 'Papers', icon: '📄', isPlaceholder: true, tag: 'Coming Soon' },
-    { id: 'activity', label: 'Activity', icon: '⚡', isPlaceholder: true, tag: 'Coming Soon' },
-  ];
 
   return (
     <div className="admin-page-container animate-fade-in">
@@ -199,45 +192,8 @@ const AdminDashboard = () => {
 
       {/* Main Admin Workspace Layout */}
       <div className="admin-workspace-layout">
-        {/* Admin Navigation Sidebar */}
-        <aside className="admin-sidebar glass-panel">
-          <div className="admin-sidebar-section">
-            <span className="admin-sidebar-heading">Admin Console</span>
-            <nav className="admin-sidebar-nav">
-              {sidebarNavItems.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={`admin-nav-item ${activeTab === item.id ? 'active' : ''} ${item.isPlaceholder ? 'placeholder' : ''}`}
-                  onClick={() => {
-                    if (!item.isPlaceholder) {
-                      setActiveTab(item.id);
-                    }
-                  }}
-                  disabled={item.isPlaceholder}
-                  title={item.isPlaceholder ? `${item.label} management is planned for future phases` : item.label}
-                >
-                  <span className="nav-item-icon">{item.icon}</span>
-                  <span className="nav-item-label">{item.label}</span>
-                  {item.tag && <span className="nav-item-tag">{item.tag}</span>}
-                </button>
-              ))}
-            </nav>
-          </div>
-
-          {/* Admin Identity Card */}
-          <div className="admin-user-card">
-            <div className="admin-user-avatar">
-              {user?.username ? user.username.charAt(0).toUpperCase() : 'A'}
-            </div>
-            <div className="admin-user-details">
-              <span className="admin-user-name">{user?.username}</span>
-              <span className="admin-user-role">
-                {user?.is_superuser ? 'Super Administrator' : 'Platform Staff'}
-              </span>
-            </div>
-          </div>
-        </aside>
+        {/* Navigation Sidebar */}
+        <AdminSidebar activeTab="dashboard" />
 
         {/* Admin Content Area */}
         <main className="admin-main-view">

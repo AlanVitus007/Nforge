@@ -15,6 +15,8 @@ import Layout from './components/Layout';
 import Landing from './pages/Landing';
 import AdminRoute from './components/AdminRoute';
 import AdminDashboard from './pages/AdminDashboard';
+import AdminUsers from './pages/AdminUsers';
+import AdminProjects from './pages/AdminProjects';
 import './App.css';
 
 function HomeRoute() {
@@ -54,6 +56,22 @@ function App() {
                 element={
                   <AdminRoute>
                     <AdminDashboard />
+                  </AdminRoute>
+                }
+              />
+              <Route
+                path="/admin/users"
+                element={
+                  <AdminRoute>
+                    <AdminUsers />
+                  </AdminRoute>
+                }
+              />
+              <Route
+                path="/admin/projects"
+                element={
+                  <AdminRoute>
+                    <AdminProjects />
                   </AdminRoute>
                 }
               />
