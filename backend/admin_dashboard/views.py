@@ -1,5 +1,5 @@
 from django.contrib.auth.models import User
-from django.db.models import Count, F, Q
+from django.db.models import Count, F, Max, Q
 from django.shortcuts import get_object_or_404
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
@@ -8,6 +8,9 @@ from rest_framework.views import APIView
 
 from admin_dashboard.permissions import IsNForgeAdmin
 from admin_dashboard.serializers import (
+    AdminPaperChunkSummarySerializer,
+    AdminPaperDetailSerializer,
+    AdminPaperListSerializer,
     AdminPaperSummarySerializer,
     AdminProjectDetailSerializer,
     AdminProjectListSerializer,
@@ -59,6 +62,8 @@ class AdminPagination(PageNumberPagination):
 
 AdminUserPagination = AdminPagination
 AdminProjectPagination = AdminPagination
+AdminPaperPagination = AdminPagination
+
 
 
 class AdminUserListView(APIView):
@@ -249,4 +254,76 @@ class AdminProjectDetailView(APIView):
         data['research_sessions'] = AdminResearchSessionSummarySerializer(sessions, many=True).data
 
         return Response(data)
+
+
+class AdminPaperListView(APIView):
+    """
+    List platform papers with search, project filtering, processing status filtering,
+    and pagination.
+    Only accessible by staff/superusers.
+    """
+    permission_classes = [IsAuthenticated, IsNForgeAdmin]
+
+    def get(self, request):
+        queryset = Paper.objects.select_related('project', 'project__owner').annotate(
+            chunk_count=Count('chunks', distinct=True),
+            page_count=Max('chunks__page_number'),
+        ).order_by('-uploaded_at')
+
+        # 1. Search by paper title
+        search = request.query_params.get('search') or request.query_params.get('q')
+        if search:
+            queryset = queryset.filter(title__icontains=search.strip())
+
+        # 2. Filter by project ID
+        project_filter = request.query_params.get('project') or request.query_params.get('project_id')
+        if project_filter:
+            queryset = queryset.filter(project_id=project_filter)
+
+        # 3. Filter by processing status if provided
+        status_filter = request.query_params.get('status') or request.query_params.get('processing_status')
+        if status_filter:
+            status_filter = status_filter.strip().upper()
+            if status_filter == 'PROCESSED':
+                queryset = queryset.filter(Q(chunk_count__gt=0) | ~Q(extracted_text=""))
+            elif status_filter in ('PENDING', 'UNPROCESSED'):
+                queryset = queryset.filter(Q(chunk_count=0) & (Q(extracted_text="") | Q(extracted_text__isnull=True)))
+
+        paginator = AdminPaperPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        if page is not None:
+            serializer = AdminPaperListSerializer(page, many=True)
+            return paginator.get_paginated_response(serializer.data)
+
+        serializer = AdminPaperListSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+
+class AdminPaperDetailView(APIView):
+    """
+    Retrieve paper detail including project, owner, safe chunk metadata,
+    and non-sensitive processing info.
+    Only accessible by staff/superusers.
+    """
+    permission_classes = [IsAuthenticated, IsNForgeAdmin]
+
+    def get(self, request, paper_id):
+        paper = get_object_or_404(
+            Paper.objects.select_related('project', 'project__owner').annotate(
+                chunk_count=Count('chunks', distinct=True),
+                page_count=Max('chunks__page_number'),
+            ),
+            pk=paper_id,
+        )
+
+        chunks = list(
+            paper.chunks.only('id', 'chunk_index', 'page_number', 'created_at', 'paper_id').order_by('chunk_index')
+        )
+
+        serializer = AdminPaperDetailSerializer(paper)
+        data = serializer.data
+        data['chunks'] = AdminPaperChunkSummarySerializer(chunks, many=True).data
+
+        return Response(data)
+
 

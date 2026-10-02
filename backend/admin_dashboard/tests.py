@@ -4,7 +4,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from admin_dashboard.permissions import IsNForgeAdmin
-from ai.models import ResearchEvidence, ResearchMessage, ResearchSession
+from ai.models import PaperChunk, ResearchEvidence, ResearchMessage, ResearchSession
 from papers.models import Paper
 from projects.models import Project, ProjectMember
 
@@ -799,5 +799,327 @@ class AdminProjectManagementAPITests(TestCase):
         self.client.force_authenticate(user=self.normal_user)
         res_normal = self.client.get(f"/api/projects/{self.project.id}/")
         self.assertEqual(res_normal.status_code, status.HTTP_404_NOT_FOUND)
+
+
+class AdminPaperManagementAPITests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.list_url = "/api/admin/papers/"
+
+        # Users
+        self.staff_admin = User.objects.create_user(
+            username="staff_paper_admin",
+            password="password123",
+            email="staff_paper@example.com",
+            is_staff=True,
+        )
+        self.superuser = User.objects.create_superuser(
+            username="super_paper_admin",
+            password="password123",
+            email="super_paper@example.com",
+        )
+        self.project_owner = User.objects.create_user(
+            username="paper_owner_user",
+            password="password123",
+            email="owner_paper@example.com",
+        )
+        self.editor = User.objects.create_user(
+            username="paper_editor_user",
+            password="password123",
+            email="editor_paper@example.com",
+        )
+        self.viewer = User.objects.create_user(
+            username="paper_viewer_user",
+            password="password123",
+            email="viewer_paper@example.com",
+        )
+        self.normal_user = User.objects.create_user(
+            username="regular_paper_user",
+            password="password123",
+            email="regular_paper@example.com",
+        )
+
+        # Projects
+        self.project1 = Project.objects.create(
+            owner=self.project_owner,
+            title="Quantum Algorithms Lab",
+            description="Exploration of variational quantum algorithms.",
+        )
+        self.project2 = Project.objects.create(
+            owner=self.project_owner,
+            title="Graph Neural Networks Research",
+            description="Deep geometric learning on biological networks.",
+        )
+
+        # Members on project 1
+        ProjectMember.objects.create(
+            project=self.project1, user=self.editor, role=ProjectMember.ROLE_EDITOR
+        )
+        ProjectMember.objects.create(
+            project=self.project1, user=self.viewer, role=ProjectMember.ROLE_VIEWER
+        )
+
+        # Paper 1: Processed with chunks and extracted text
+        self.paper1 = Paper.objects.create(
+            project=self.project1,
+            title="Surface Codes and Fault Tolerance",
+            file="papers/surface_codes.pdf",
+            extracted_text="SUPER_SECRET_EXTRACTED_PAPER_TEXT_DO_NOT_LEAK",
+        )
+        # Chunks for Paper 1
+        self.chunk1 = PaperChunk.objects.create(
+            paper=self.paper1,
+            chunk_index=0,
+            page_number=1,
+            text="CHUNK_0_SECRET_RAW_TEXT_SHOULD_NEVER_BE_EXPOSED",
+        )
+        self.chunk2 = PaperChunk.objects.create(
+            paper=self.paper1,
+            chunk_index=1,
+            page_number=2,
+            text="CHUNK_1_SECRET_RAW_TEXT_SHOULD_NEVER_BE_EXPOSED",
+        )
+        self.chunk3 = PaperChunk.objects.create(
+            paper=self.paper1,
+            chunk_index=2,
+            page_number=3,
+            text="CHUNK_2_SECRET_RAW_TEXT_SHOULD_NEVER_BE_EXPOSED",
+        )
+
+        # Paper 2: Unprocessed (zero chunks, empty extracted_text)
+        self.paper2 = Paper.objects.create(
+            project=self.project2,
+            title="Message Passing Architectures in Proteomics",
+            file="papers/gnn_proteomics.pdf",
+            extracted_text="",
+        )
+
+        # Research Session & Evidence on project 1
+        self.session = ResearchSession.objects.create(
+            project=self.project1,
+            title="Tolerance Benchmarks",
+        )
+        self.session.papers.add(self.paper1)
+        self.msg_assistant = ResearchMessage.objects.create(
+            session=self.session,
+            role=ResearchMessage.ROLE_ASSISTANT,
+            content="SECRET_RESEARCH_MESSAGE_CONTENT",
+        )
+        self.evidence = ResearchEvidence.objects.create(
+            message=self.msg_assistant,
+            paper=self.paper1,
+            text="SECRET_RESEARCH_EVIDENCE_EXCERPT",
+        )
+
+    def test_admin_can_list_papers(self):
+        """Staff and superuser admins can retrieve list of papers."""
+        self.client.force_authenticate(user=self.staff_admin)
+        res = self.client.get(self.list_url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertIn("results", res.data)
+        self.assertGreaterEqual(res.data["count"], 2)
+
+        # Verify superuser can also access
+        self.client.force_authenticate(user=self.superuser)
+        res_super = self.client.get(self.list_url)
+        self.assertEqual(res_super.status_code, status.HTTP_200_OK)
+
+    def test_admin_can_search_papers(self):
+        """Case-insensitive search queries match paper title."""
+        self.client.force_authenticate(user=self.staff_admin)
+
+        # Search match "surface"
+        res = self.client.get(f"{self.list_url}?search=surface")
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["count"], 1)
+        self.assertEqual(res.data["results"][0]["id"], self.paper1.id)
+
+        # Search match "passing"
+        res2 = self.client.get(f"{self.list_url}?search=passing")
+        self.assertEqual(res2.status_code, status.HTTP_200_OK)
+        self.assertEqual(res2.data["count"], 1)
+        self.assertEqual(res2.data["results"][0]["id"], self.paper2.id)
+
+        # Search match none
+        res3 = self.client.get(f"{self.list_url}?search=nonexistenttermxyz")
+        self.assertEqual(res3.status_code, status.HTTP_200_OK)
+        self.assertEqual(res3.data["count"], 0)
+
+    def test_admin_can_filter_by_project(self):
+        """Filtering by project ID isolates papers belonging to that project."""
+        self.client.force_authenticate(user=self.staff_admin)
+
+        # Project 1 filter
+        res1 = self.client.get(f"{self.list_url}?project={self.project1.id}")
+        self.assertEqual(res1.status_code, status.HTTP_200_OK)
+        self.assertEqual(res1.data["count"], 1)
+        self.assertEqual(res1.data["results"][0]["id"], self.paper1.id)
+
+        # Project 2 filter
+        res2 = self.client.get(f"{self.list_url}?project={self.project2.id}")
+        self.assertEqual(res2.status_code, status.HTTP_200_OK)
+        self.assertEqual(res2.data["count"], 1)
+        self.assertEqual(res2.data["results"][0]["id"], self.paper2.id)
+
+    def test_admin_can_retrieve_paper_details(self):
+        """Admin can retrieve full paper details with chunk summaries."""
+        self.client.force_authenticate(user=self.staff_admin)
+        res = self.client.get(f"{self.list_url}{self.paper1.id}/")
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["id"], self.paper1.id)
+        self.assertEqual(res.data["title"], "Surface Codes and Fault Tolerance")
+        self.assertIn("project", res.data)
+        self.assertIn("chunks", res.data)
+        self.assertIn("processing_status", res.data)
+        self.assertEqual(len(res.data["chunks"]), 3)
+
+    def test_normal_user_receives_403(self):
+        """Regular users receive 403 on admin paper endpoints."""
+        self.client.force_authenticate(user=self.normal_user)
+
+        res_list = self.client.get(self.list_url)
+        self.assertEqual(res_list.status_code, status.HTTP_403_FORBIDDEN)
+
+        res_detail = self.client.get(f"{self.list_url}{self.paper1.id}/")
+        self.assertEqual(res_detail.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_owner_editor_viewer_receive_403(self):
+        """Project owners, editors, and viewers without staff status receive 403."""
+        for u in [self.project_owner, self.editor, self.viewer]:
+            self.client.force_authenticate(user=u)
+            res_list = self.client.get(self.list_url)
+            self.assertEqual(res_list.status_code, status.HTTP_403_FORBIDDEN)
+
+            res_detail = self.client.get(f"{self.list_url}{self.paper1.id}/")
+            self.assertEqual(res_detail.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_unauthenticated_request_rejected(self):
+        """Unauthenticated requests are rejected with 401."""
+        res_list = self.client.get(self.list_url)
+        self.assertEqual(res_list.status_code, status.HTTP_401_UNAUTHORIZED)
+
+        res_detail = self.client.get(f"{self.list_url}{self.paper1.id}/")
+        self.assertEqual(res_detail.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_project_and_owner_metadata_are_correct(self):
+        """Paper reflects associated project and project owner metadata accurately."""
+        self.client.force_authenticate(user=self.staff_admin)
+        res = self.client.get(f"{self.list_url}{self.paper1.id}/")
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+        self.assertEqual(res.data["project_id"], self.project1.id)
+        self.assertEqual(res.data["project_title"], "Quantum Algorithms Lab")
+        self.assertEqual(res.data["project_owner"], "paper_owner_user")
+        self.assertEqual(res.data["project"]["title"], "Quantum Algorithms Lab")
+        self.assertEqual(res.data["project"]["owner"]["username"], "paper_owner_user")
+
+    def test_chunk_count_is_correct(self):
+        """Chunk count reflects generated paper chunks."""
+        self.client.force_authenticate(user=self.staff_admin)
+
+        # Paper 1 has 3 chunks
+        res1 = self.client.get(f"{self.list_url}{self.paper1.id}/")
+        self.assertEqual(res1.data["chunk_count"], 3)
+
+        # Paper 2 has 0 chunks
+        res2 = self.client.get(f"{self.list_url}{self.paper2.id}/")
+        self.assertEqual(res2.data["chunk_count"], 0)
+
+    def test_processing_metadata_is_correct(self):
+        """Processing metadata and status filter reflect chunk and text availability."""
+        self.client.force_authenticate(user=self.staff_admin)
+
+        # Detail checks for processed paper
+        res1 = self.client.get(f"{self.list_url}{self.paper1.id}/")
+        self.assertEqual(res1.data["processing_status"], "PROCESSED")
+        self.assertEqual(res1.data["page_count"], 3)
+        self.assertTrue(res1.data["has_extracted_text"])
+        self.assertGreater(res1.data["extracted_text_length"], 0)
+
+        # Detail checks for pending paper
+        res2 = self.client.get(f"{self.list_url}{self.paper2.id}/")
+        self.assertEqual(res2.data["processing_status"], "PENDING")
+        self.assertFalse(res2.data["has_extracted_text"])
+        self.assertEqual(res2.data["extracted_text_length"], 0)
+
+        # Filter by status: PROCESSED
+        res_proc = self.client.get(f"{self.list_url}?status=PROCESSED")
+        self.assertEqual(res_proc.status_code, status.HTTP_200_OK)
+        proc_ids = [p["id"] for p in res_proc.data["results"]]
+        self.assertIn(self.paper1.id, proc_ids)
+        self.assertNotIn(self.paper2.id, proc_ids)
+
+        # Filter by status: PENDING
+        res_pend = self.client.get(f"{self.list_url}?status=PENDING")
+        self.assertEqual(res_pend.status_code, status.HTTP_200_OK)
+        pend_ids = [p["id"] for p in res_pend.data["results"]]
+        self.assertIn(self.paper2.id, pend_ids)
+        self.assertNotIn(self.paper1.id, pend_ids)
+
+    def test_sensitive_extracted_text_not_returned(self):
+        """Full extracted paper text is never returned in list or detail."""
+        self.client.force_authenticate(user=self.staff_admin)
+
+        res_list = self.client.get(self.list_url)
+        self.assertNotIn("SUPER_SECRET_EXTRACTED_PAPER_TEXT_DO_NOT_LEAK", str(res_list.data))
+
+        res_detail = self.client.get(f"{self.list_url}{self.paper1.id}/")
+        self.assertNotIn("SUPER_SECRET_EXTRACTED_PAPER_TEXT_DO_NOT_LEAK", str(res_detail.data))
+
+    def test_full_chunk_text_not_returned(self):
+        """Raw chunk text is omitted from chunk summary representations."""
+        self.client.force_authenticate(user=self.staff_admin)
+        res_detail = self.client.get(f"{self.list_url}{self.paper1.id}/")
+        self.assertEqual(res_detail.status_code, status.HTTP_200_OK)
+
+        payload_str = str(res_detail.data)
+        self.assertNotIn("CHUNK_0_SECRET_RAW_TEXT_SHOULD_NEVER_BE_EXPOSED", payload_str)
+        self.assertNotIn("CHUNK_1_SECRET_RAW_TEXT_SHOULD_NEVER_BE_EXPOSED", payload_str)
+        self.assertNotIn("CHUNK_2_SECRET_RAW_TEXT_SHOULD_NEVER_BE_EXPOSED", payload_str)
+
+    def test_research_content_not_returned(self):
+        """Research messages, prompts, and evidence are not exposed through paper endpoints."""
+        self.client.force_authenticate(user=self.staff_admin)
+        res = self.client.get(f"{self.list_url}{self.paper1.id}/")
+
+        payload_str = str(res.data)
+        self.assertNotIn("SECRET_RESEARCH_MESSAGE_CONTENT", payload_str)
+        self.assertNotIn("SECRET_RESEARCH_EVIDENCE_EXCERPT", payload_str)
+        self.assertNotIn("password", payload_str.lower())
+        self.assertNotIn("auth_token", payload_str.lower())
+
+    def test_pagination_works(self):
+        """Pagination returns accurate count, total_pages, and sliced results."""
+        for i in range(12):
+            Paper.objects.create(
+                project=self.project1,
+                title=f"Batch Paper {i}",
+                file=f"papers/batch_{i}.pdf",
+            )
+
+        self.client.force_authenticate(user=self.staff_admin)
+        res_p1 = self.client.get(f"{self.list_url}?page=1&page_size=10")
+        self.assertEqual(res_p1.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(res_p1.data["results"]), 10)
+        self.assertGreater(res_p1.data["total_pages"], 1)
+
+        res_p2 = self.client.get(f"{self.list_url}?page=2&page_size=10")
+        self.assertEqual(res_p2.status_code, status.HTTP_200_OK)
+        self.assertGreaterEqual(len(res_p2.data["results"]), 4)
+
+    def test_existing_paper_permissions_unaffected(self):
+        """Existing paper APIs retain their authorization rules."""
+        self.client.force_authenticate(user=self.project_owner)
+        res_owner = self.client.get(f"/api/projects/{self.project1.id}/papers/")
+        self.assertEqual(res_owner.status_code, status.HTTP_200_OK)
+
+        self.client.force_authenticate(user=self.editor)
+        res_editor = self.client.get(f"/api/projects/{self.project1.id}/papers/")
+        self.assertEqual(res_editor.status_code, status.HTTP_200_OK)
+
+        self.client.force_authenticate(user=self.normal_user)
+        res_normal = self.client.get(f"/api/projects/{self.project1.id}/papers/")
+        self.assertEqual(res_normal.status_code, status.HTTP_404_NOT_FOUND)
+
 
 

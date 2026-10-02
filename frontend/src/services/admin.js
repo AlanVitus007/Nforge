@@ -25,3 +25,14 @@ export const getAdminProjectDetail = async (projectId) => {
   return response.data;
 };
 
+export const getAdminPapers = async (params = {}) => {
+  const response = await api.get('/admin/papers/', { params });
+  return response.data;
+};
+
+export const getAdminPaperDetail = async (paperId) => {
+  const response = await api.get(`/admin/papers/${paperId}/`);
+  return response.data;
+};
+
+
