@@ -18,6 +18,7 @@ import AdminDashboard from './pages/AdminDashboard';
 import AdminUsers from './pages/AdminUsers';
 import AdminProjects from './pages/AdminProjects';
 import AdminPapers from './pages/AdminPapers';
+import AdminActivity from './pages/AdminActivity';
 import './App.css';
 
 function HomeRoute() {
@@ -81,6 +82,14 @@ function App() {
                 element={
                   <AdminRoute>
                     <AdminPapers />
+                  </AdminRoute>
+                }
+              />
+              <Route
+                path="/admin/activity"
+                element={
+                  <AdminRoute>
+                    <AdminActivity />
                   </AdminRoute>
                 }
               />

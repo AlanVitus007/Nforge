@@ -7,6 +7,7 @@ from .views import (
     AdminProjectDetailView,
     AdminPaperListView,
     AdminPaperDetailView,
+    AdminActivityOverviewView,
 )
 
 urlpatterns = [
@@ -17,6 +18,8 @@ urlpatterns = [
     path('projects/<int:project_id>/', AdminProjectDetailView.as_view(), name='admin-project-detail'),
     path('papers/', AdminPaperListView.as_view(), name='admin-paper-list'),
     path('papers/<int:paper_id>/', AdminPaperDetailView.as_view(), name='admin-paper-detail'),
+    path('activity/', AdminActivityOverviewView.as_view(), name='admin-activity-overview'),
 ]
+
 
 

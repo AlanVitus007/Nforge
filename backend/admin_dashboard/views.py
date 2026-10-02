@@ -14,6 +14,9 @@ from admin_dashboard.serializers import (
     AdminPaperSummarySerializer,
     AdminProjectDetailSerializer,
     AdminProjectListSerializer,
+    AdminRecentPaperSerializer,
+    AdminRecentResearchSessionSerializer,
+    AdminRecentUserSerializer,
     AdminResearchSessionSummarySerializer,
     AdminUserDetailSerializer,
     AdminUserListSerializer,
@@ -325,5 +328,66 @@ class AdminPaperDetailView(APIView):
         data['chunks'] = AdminPaperChunkSummarySerializer(chunks, many=True).data
 
         return Response(data)
+
+
+class AdminActivityOverviewView(APIView):
+    """
+    Admin activity overview endpoint returning platform aggregates and recent
+    events across user registrations, paper uploads, and research session updates.
+    Only accessible by staff/superusers.
+    """
+    permission_classes = [IsAuthenticated, IsNForgeAdmin]
+
+    def get(self, request):
+        total_users = User.objects.count()
+        total_projects = Project.objects.count()
+        total_papers = Paper.objects.count()
+        total_research_sessions = ResearchSession.objects.count()
+        total_research_messages = ResearchMessage.objects.count()
+
+        recent_users_qs = User.objects.only(
+            'id', 'username', 'email', 'date_joined', 'is_active'
+        ).order_by('-date_joined')[:10]
+
+        recent_papers_qs = Paper.objects.select_related(
+            'project', 'project__owner'
+        ).only(
+            'id', 'title', 'file', 'uploaded_at', 'project__id', 'project__title', 'project__owner__username'
+        ).order_by('-uploaded_at')[:10]
+
+        recent_sessions_qs = ResearchSession.objects.select_related(
+            'project'
+        ).annotate(
+            message_count=Count('messages', distinct=True)
+        ).only(
+            'id', 'title', 'created_at', 'updated_at', 'project__id', 'project__title'
+        ).order_by('-updated_at')[:10]
+
+        recent_users_data = AdminRecentUserSerializer(recent_users_qs, many=True).data
+        recent_papers_data = AdminRecentPaperSerializer(recent_papers_qs, many=True).data
+        recent_sessions_data = AdminRecentResearchSessionSerializer(recent_sessions_qs, many=True).data
+
+        data = {
+            'total_users': total_users,
+            'total_projects': total_projects,
+            'total_papers': total_papers,
+            'total_research_sessions': total_research_sessions,
+            'total_research_messages': total_research_messages,
+            'recent_users': recent_users_data,
+            'recent_papers': recent_papers_data,
+            'recent_research_sessions': recent_sessions_data,
+            # Aliases for convenience
+            'users': total_users,
+            'projects': total_projects,
+            'papers': total_papers,
+            'research_sessions': total_research_sessions,
+            'research_messages': total_research_messages,
+            'recent_user_registrations': recent_users_data,
+            'recently_uploaded_papers': recent_papers_data,
+            'recently_updated_research_sessions': recent_sessions_data,
+        }
+
+        return Response(data)
+
 
 

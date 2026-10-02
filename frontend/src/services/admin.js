@@ -35,4 +35,10 @@ export const getAdminPaperDetail = async (paperId) => {
   return response.data;
 };
 
+export const getAdminActivity = async () => {
+  const response = await api.get('/admin/activity/');
+  return response.data;
+};
+
+
 

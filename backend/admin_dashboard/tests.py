@@ -1122,4 +1122,196 @@ class AdminPaperManagementAPITests(TestCase):
         self.assertEqual(res_normal.status_code, status.HTTP_404_NOT_FOUND)
 
 
+class AdminActivityOverviewAPITests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.url = "/api/admin/activity/"
+
+        # Users
+        self.staff_admin = User.objects.create_user(
+            username="activity_staff_admin",
+            password="password123",
+            email="activity_staff@example.com",
+            is_staff=True,
+        )
+        self.superuser = User.objects.create_superuser(
+            username="activity_super_admin",
+            password="password123",
+            email="activity_super@example.com",
+        )
+        self.project_owner = User.objects.create_user(
+            username="activity_owner_user",
+            password="password123",
+            email="activity_owner@example.com",
+        )
+        self.editor = User.objects.create_user(
+            username="activity_editor_user",
+            password="password123",
+            email="activity_editor@example.com",
+        )
+        self.viewer = User.objects.create_user(
+            username="activity_viewer_user",
+            password="password123",
+            email="activity_viewer@example.com",
+        )
+        self.normal_user = User.objects.create_user(
+            username="activity_regular_user",
+            password="password123",
+            email="activity_regular@example.com",
+        )
+
+        # Projects
+        self.project1 = Project.objects.create(
+            owner=self.project_owner,
+            title="Activity Test Project 1",
+            description="First project for activity verification.",
+        )
+        self.project2 = Project.objects.create(
+            owner=self.project_owner,
+            title="Activity Test Project 2",
+            description="Second project for activity verification.",
+        )
+
+        # Members
+        ProjectMember.objects.create(
+            project=self.project1, user=self.editor, role=ProjectMember.ROLE_EDITOR
+        )
+        ProjectMember.objects.create(
+            project=self.project1, user=self.viewer, role=ProjectMember.ROLE_VIEWER
+        )
+
+        # Papers
+        self.paper1 = Paper.objects.create(
+            project=self.project1,
+            title="Activity Paper 1",
+            file="papers/act1.pdf",
+            extracted_text="SECRET_PAPER_1_TEXT",
+        )
+        self.paper2 = Paper.objects.create(
+            project=self.project2,
+            title="Activity Paper 2",
+            file="papers/act2.pdf",
+            extracted_text="SECRET_PAPER_2_TEXT",
+        )
+
+        # Research Session & Messages
+        self.session1 = ResearchSession.objects.create(
+            project=self.project1,
+            title="Activity Session 1",
+        )
+        self.session2 = ResearchSession.objects.create(
+            project=self.project2,
+            title="Activity Session 2",
+        )
+
+        self.msg = ResearchMessage.objects.create(
+            session=self.session1,
+            role=ResearchMessage.ROLE_ASSISTANT,
+            content="SECRET_ACTIVITY_MESSAGE_CONTENT",
+        )
+        self.evidence = ResearchEvidence.objects.create(
+            message=self.msg,
+            paper=self.paper1,
+            text="SECRET_ACTIVITY_EVIDENCE_TEXT",
+        )
+
+    def test_admin_receives_200(self):
+        """Staff and superuser receive 200 with activity data."""
+        self.client.force_authenticate(user=self.staff_admin)
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertIn("total_users", res.data)
+        self.assertIn("recent_users", res.data)
+        self.assertIn("recent_papers", res.data)
+        self.assertIn("recent_research_sessions", res.data)
+
+        # Superuser verification
+        self.client.force_authenticate(user=self.superuser)
+        res_super = self.client.get(self.url)
+        self.assertEqual(res_super.status_code, status.HTTP_200_OK)
+
+    def test_unauthenticated_receives_401(self):
+        """Unauthenticated requests are rejected with 401."""
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_normal_users_owners_editors_viewers_receive_403(self):
+        """Non-admin users receive 403 on activity overview."""
+        for u in [self.normal_user, self.project_owner, self.editor, self.viewer]:
+            self.client.force_authenticate(user=u)
+            res = self.client.get(self.url)
+            self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_aggregate_counts_are_correct(self):
+        """Activity overview returns exact aggregate counts across all platform entities."""
+        self.client.force_authenticate(user=self.staff_admin)
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+        self.assertEqual(res.data["total_users"], User.objects.count())
+        self.assertEqual(res.data["total_projects"], Project.objects.count())
+        self.assertEqual(res.data["total_papers"], Paper.objects.count())
+        self.assertEqual(res.data["total_research_sessions"], ResearchSession.objects.count())
+        self.assertEqual(res.data["total_research_messages"], ResearchMessage.objects.count())
+
+    def test_recent_activity_ordering(self):
+        """Recent activity items are ordered with the most recent first."""
+        self.client.force_authenticate(user=self.staff_admin)
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+        # Users ordering
+        users = res.data["recent_users"]
+        self.assertGreater(len(users), 0)
+        user_dates = [u["date_joined"] for u in users]
+        self.assertEqual(user_dates, sorted(user_dates, reverse=True))
+
+        # Papers ordering
+        papers = res.data["recent_papers"]
+        self.assertGreater(len(papers), 0)
+        paper_dates = [p["uploaded_at"] for p in papers]
+        self.assertEqual(paper_dates, sorted(paper_dates, reverse=True))
+
+        # Sessions ordering
+        sessions = res.data["recent_research_sessions"]
+        self.assertGreater(len(sessions), 0)
+        session_dates = [s["updated_at"] for s in sessions]
+        self.assertEqual(session_dates, sorted(session_dates, reverse=True))
+
+    def test_sensitive_research_content_not_returned(self):
+        """Extracted text, prompts, research message contents, and credentials are omitted."""
+        self.client.force_authenticate(user=self.staff_admin)
+        res = self.client.get(self.url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+        payload_str = str(res.data)
+        self.assertNotIn("SECRET_PAPER_1_TEXT", payload_str)
+        self.assertNotIn("SECRET_PAPER_2_TEXT", payload_str)
+        self.assertNotIn("SECRET_ACTIVITY_MESSAGE_CONTENT", payload_str)
+        self.assertNotIn("SECRET_ACTIVITY_EVIDENCE_TEXT", payload_str)
+        self.assertNotIn("password", payload_str.lower())
+        self.assertNotIn("auth_token", payload_str.lower())
+
+    def test_existing_functionality_unaffected(self):
+        """Previous Phase 8.1, 8.2, 8.3, and 8.4 endpoints continue operating normally."""
+        self.client.force_authenticate(user=self.staff_admin)
+
+        # Dashboard
+        res_dash = self.client.get("/api/admin/dashboard/")
+        self.assertEqual(res_dash.status_code, status.HTTP_200_OK)
+
+        # Users
+        res_users = self.client.get("/api/admin/users/")
+        self.assertEqual(res_users.status_code, status.HTTP_200_OK)
+
+        # Projects
+        res_proj = self.client.get("/api/admin/projects/")
+        self.assertEqual(res_proj.status_code, status.HTTP_200_OK)
+
+        # Papers
+        res_papers = self.client.get("/api/admin/papers/")
+        self.assertEqual(res_papers.status_code, status.HTTP_200_OK)
+
+
+
 
