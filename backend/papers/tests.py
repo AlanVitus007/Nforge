@@ -170,3 +170,29 @@ class PaperAPITests(APITestCase):
         r = self.client.delete(self._detail_url(self.project_a.pk, self.paper.pk))
         self.assertEqual(r.status_code, status.HTTP_404_NOT_FOUND)
         self.assertTrue(Paper.objects.filter(pk=self.paper.pk).exists())
+
+    # ── paper update (rename) ──────────────────────────────────────────────────
+
+    def test_update_own_paper_title(self):
+        self.auth(self.token_a)
+        r = self.client.patch(
+            self._detail_url(self.project_a.pk, self.paper.pk),
+            {'title': 'Updated Paper Title'},
+            format='json'
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(r.data['title'], 'Updated Paper Title')
+        self.paper.refresh_from_db()
+        self.assertEqual(self.paper.title, 'Updated Paper Title')
+
+    def test_update_other_users_paper_returns_404(self):
+        self.auth(self.token_b)
+        r = self.client.patch(
+            self._detail_url(self.project_a.pk, self.paper.pk),
+            {'title': 'Hacked Title'},
+            format='json'
+        )
+        self.assertEqual(r.status_code, status.HTTP_404_NOT_FOUND)
+        self.paper.refresh_from_db()
+        self.assertEqual(self.paper.title, 'Existing Paper')
+

@@ -1,32 +1,64 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useContext, useCallback } from "react";
 import { Link } from "react-router-dom";
 import api from "../services/api";
+import { AuthContext } from "../context/AuthContext";
+import Card from "../components/Card";
+import Button from "../components/Button";
+import Input from "../components/Input";
+import DeleteModal from "../components/DeleteModal";
+import ProjectInvitations from "../components/ProjectInvitations";
+import { getProjectMembers } from "../services/collaboration";
 
 function Projects() {
+    const { user } = useContext(AuthContext);
     const [projects, setProjects] = useState([]);
+    const [projectRoles, setProjectRoles] = useState({});
     const [title, setTitle] = useState("");
     const [description, setDescription] = useState("");
     const [loading, setLoading] = useState(true);
     const [creating, setCreating] = useState(false);
     const [error, setError] = useState("");
+    const [deleteModal, setDeleteModal] = useState({ open: false, projectId: null, projectTitle: '' });
+    const [isDeleting, setIsDeleting] = useState(false);
 
-    const fetchProjects = async () => {
+    const fetchProjects = useCallback(async () => {
         try {
             setLoading(true);
             setError("");
-
             const response = await api.get("/projects/");
-            setProjects(response.data);
+            const projectList = response.data || [];
+            setProjects(projectList);
+
+            // Fetch member roles for shared projects
+            if (user && projectList.length > 0) {
+                const sharedProjects = projectList.filter((p) => p.owner !== user.username);
+                if (sharedProjects.length > 0) {
+                    const roleEntries = await Promise.all(
+                        sharedProjects.map(async (p) => {
+                            try {
+                                const members = await getProjectMembers(p.id);
+                                const myMember = members.find(
+                                    (m) => m.username === user.username || m.user_id === user.id
+                                );
+                                return [p.id, myMember?.role || "VIEWER"];
+                            } catch {
+                                return [p.id, "VIEWER"];
+                            }
+                        })
+                    );
+                    setProjectRoles(Object.fromEntries(roleEntries));
+                }
+            }
         } catch (err) {
             setError("Failed to load projects.");
         } finally {
             setLoading(false);
         }
-    };
+    }, [user]);
 
     useEffect(() => {
         fetchProjects();
-    }, []);
+    }, [fetchProjects]);
 
     const handleCreate = async (e) => {
         e.preventDefault();
@@ -39,15 +71,9 @@ function Projects() {
         try {
             setCreating(true);
             setError("");
-
-            await api.post("/projects/", {
-                title,
-                description,
-            });
-
+            await api.post("/projects/", { title, description });
             setTitle("");
             setDescription("");
-
             await fetchProjects();
         } catch (err) {
             setError("Failed to create project.");
@@ -56,76 +82,181 @@ function Projects() {
         }
     };
 
+    const openDeleteModal = (projectId, projectTitle) => {
+        setDeleteModal({ open: true, projectId, projectTitle });
+    };
+
+    const closeDeleteModal = () => {
+        if (isDeleting) return;
+        setDeleteModal({ open: false, projectId: null, projectTitle: '' });
+    };
+
+    const handleDelete = async () => {
+        const { projectId } = deleteModal;
+        try {
+            setIsDeleting(true);
+            setError("");
+            await api.delete(`/projects/${projectId}/`);
+            setProjects((currentProjects) =>
+                currentProjects.filter((project) => project.id !== projectId)
+            );
+            closeDeleteModal();
+        } catch (err) {
+            setError("Failed to delete project.");
+        } finally {
+            setIsDeleting(false);
+        }
+    };
+
     return (
-        <div>
-            <h1>My Projects</h1>
+        <>
+        <div style={{ maxWidth: '900px', margin: '0 auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+                <div>
+                    <h1 style={{ marginBottom: '0.5rem' }}>My Projects</h1>
+                    <p style={{ color: 'var(--text-secondary)' }}>Create and manage your research projects.</p>
+                </div>
+            </div>
 
-            <p>Create and manage your research projects.</p>
+            {error && (
+                <div style={{ padding: '1rem', background: 'rgba(239, 68, 68, 0.1)', color: 'var(--danger)', borderRadius: 'var(--radius-md)', marginBottom: '2rem' }}>
+                    {error}
+                </div>
+            )}
 
-            {error && <p>{error}</p>}
+            {/* Pending Invitations Banner */}
+            <ProjectInvitations onAccepted={fetchProjects} />
 
-            <section>
-                <h2>Create Project</h2>
-
-                <form onSubmit={handleCreate}>
-                    <div>
-                        <label>Title</label>
-                        <br />
-                        <input
-                            type="text"
-                            value={title}
-                            onChange={(e) => setTitle(e.target.value)}
-                            placeholder="Project title"
-                        />
-                    </div>
-
-                    <br />
-
-                    <div>
-                        <label>Description</label>
-                        <br />
-                        <textarea
-                            value={description}
-                            onChange={(e) => setDescription(e.target.value)}
-                            placeholder="Project description"
-                            rows="4"
-                        />
-                    </div>
-
-                    <br />
-
-                    <button type="submit" disabled={creating}>
-                        {creating ? "Creating..." : "Create Project"}
-                    </button>
-                </form>
-            </section>
-
-            <hr />
-
-            <section>
-                <h2>Your Projects</h2>
-
-                {loading ? (
-                    <p>Loading projects...</p>
-                ) : projects.length === 0 ? (
-                    <p>No projects yet. Create your first project above.</p>
-                ) : (
-                    <div>
-                        {projects.map((project) => (
-                            <div key={project.id}>
-                                <h3>
-                                    <Link to={`/projects/${project.id}`}>
-                                        {project.title}
-                                    </Link>
-                                </h3>
-
-                                <p>{project.description || "No description."}</p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '2rem' }}>
+                <aside>
+                    <Card>
+                        <h3 style={{ marginTop: 0, marginBottom: '1.5rem' }}>Create New</h3>
+                        <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                            <Input
+                                label="Title"
+                                id="title"
+                                type="text"
+                                value={title}
+                                onChange={(e) => setTitle(e.target.value)}
+                                placeholder="Project title"
+                            />
+                            <div className="input-group">
+                                <label htmlFor="desc">Description</label>
+                                <textarea
+                                    id="desc"
+                                    className="input"
+                                    value={description}
+                                    onChange={(e) => setDescription(e.target.value)}
+                                    placeholder="Brief description"
+                                    rows="4"
+                                    style={{ resize: 'vertical' }}
+                                />
                             </div>
-                        ))}
-                    </div>
-                )}
-            </section>
+                            <Button type="submit" disabled={creating} style={{ marginTop: '0.5rem' }}>
+                                {creating ? "Creating..." : "Create Project"}
+                            </Button>
+                        </form>
+                    </Card>
+                </aside>
+
+                <section>
+                    {loading ? (
+                        <div style={{ textAlign: 'center', padding: '3rem 0', color: 'var(--text-secondary)' }}>
+                            Loading projects...
+                        </div>
+                    ) : projects.length === 0 ? (
+                        <Card style={{ textAlign: 'center', padding: '3rem 2rem' }}>
+                            <h3 style={{ color: 'var(--text-secondary)' }}>No projects yet</h3>
+                            <p>Create your first project using the form.</p>
+                        </Card>
+                    ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                            {projects.map((project) => {
+                                const isOwner = user && project.owner === user.username;
+                                const role = isOwner
+                                    ? "OWNER"
+                                    : projectRoles[project.id] || "VIEWER";
+                                const roleBadgeClass =
+                                    role === "OWNER"
+                                        ? "role-badge-owner"
+                                        : role === "EDITOR"
+                                        ? "role-badge-editor"
+                                        : "role-badge-viewer";
+
+                                return (
+                                    <Card
+                                        key={project.id}
+                                        className="card-glass"
+                                        style={{
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'flex-start',
+                                            gap: '1rem',
+                                        }}
+                                    >
+                                        <div style={{ flex: 1 }}>
+                                            <div
+                                                style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.65rem',
+                                                    marginBottom: '0.5rem',
+                                                    flexWrap: 'wrap',
+                                                }}
+                                            >
+                                                <h3 style={{ margin: 0 }}>
+                                                    <Link
+                                                        to={`/projects/${project.id}`}
+                                                        style={{ color: 'var(--text-primary)' }}
+                                                    >
+                                                        {project.title}
+                                                    </Link>
+                                                </h3>
+                                                <span className={`invitation-role-badge ${roleBadgeClass}`}>
+                                                    {role === "OWNER" ? "Owner" : role === "EDITOR" ? "Editor" : "Viewer"}
+                                                </span>
+                                            </div>
+                                            <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                                                {project.description || "No description."}
+                                            </p>
+                                            <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                                Owner: @{project.owner} &bull; {project.paper_count || 0} {project.paper_count === 1 ? 'paper' : 'papers'}
+                                            </div>
+                                        </div>
+
+                                        {isOwner && (
+                                            <Button 
+                                                variant="danger" 
+                                                onClick={() => openDeleteModal(project.id, project.title)}
+                                                style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', flexShrink: 0 }}
+                                            >
+                                                Delete
+                                            </Button>
+                                        )}
+                                    </Card>
+                                );
+                            })}
+                        </div>
+                    )}
+                </section>
+            </div>
         </div>
+
+        <DeleteModal
+            isOpen={deleteModal.open}
+            onClose={closeDeleteModal}
+            onConfirm={handleDelete}
+            title="Delete Project?"
+            message={
+                <>
+                    Are you sure you want to delete{' '}
+                    <strong>"{deleteModal.projectTitle}"</strong>?
+                </>
+            }
+            warning="All papers in this project will also be permanently deleted."
+            isDeleting={isDeleting}
+        />
+        </>
     );
 }
 
