@@ -39,6 +39,8 @@ function PaperDetails() {
     const [gapsSources, setGapsSources] = useState([]);
     const [gapsLoading, setGapsLoading] = useState(false);
     const [gapsError, setGapsError] = useState("");
+    // Feature flag: Research Gaps is temporarily hidden from the Paper page
+    const [showResearchGaps] = useState(false);
 
     const [selectedEvidence, setSelectedEvidence] = useState(null);
 
@@ -1119,7 +1121,8 @@ function PaperDetails() {
                             )}
                         </Card>
 
-                        {/* RESEARCH GAPS */}
+                        {/* Temporarily hidden: Research Gaps feature on Paper page */}
+                        {showResearchGaps && (
                         <Card>
                             <h3
                                 style={{
@@ -1357,6 +1360,7 @@ function PaperDetails() {
                                 </div>
                             )}
                         </Card>
+                        )}
 
                     </div>
                 </section>
