@@ -7,7 +7,7 @@ from rest_framework.test import APIClient
 from admin_dashboard.permissions import IsNForgeAdmin
 from ai.models import PaperChunk, ResearchEvidence, ResearchMessage, ResearchSession
 from papers.models import Paper
-from projects.models import Project, ProjectMember
+from projects.models import Project, ProjectMember, ProjectInvitation
 
 
 
@@ -1759,9 +1759,10 @@ class AdminActivityDetailAPITests(TestCase):
 
         expected_fields = [
             "id", "session_id", "session_title", "project_id", "project_title",
-            "project_owner", "user_id", "username", "user_role", "role",
-            "operation", "operation_name", "evidence_count", "has_evidence",
-            "status", "related_papers", "citations", "privacy_notice", "created_at"
+            "project_owner", "user_id", "username", "user_role", "role", "message_role",
+            "operation", "operation_name", "operation_type", "operation_display_name",
+            "evidence_count", "has_evidence", "status", "related_papers", "citations",
+            "privacy_notice", "created_at", "timestamp"
         ]
         for field in expected_fields:
             self.assertIn(field, res.data, f"Field '{field}' should be in detail response")
@@ -1837,6 +1838,452 @@ class AdminActivityDetailAPITests(TestCase):
 
         self.assertNotIn("content", res.data)
         self.assertNotIn("text", res.data)
+
+
+class AdminSecurityAuditHardeningTests(TestCase):
+    """
+    Comprehensive regression test suite for Phase 8.6.1 NForge Admin Security Audit and Hardening.
+    Validates:
+    A. Full Admin Authorization Matrix (all endpoints reject anon with 401, non-admins with 403, allow staff/super with 200)
+    B. IDOR Defense & Nonexistent 404 handling across all detail endpoints
+    C. Project & Paper boundary isolation
+    D. Collaboration permission enforcement (invite, remove, cancel, accept, decline, leave)
+    E. Research session & AI generation authorization (viewer rejection, mixed-project rejection, session mismatch)
+    F. Strict exclusion of sensitive researcher data, passwords, embeddings, and raw text
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+
+        # Users
+        self.superuser = User.objects.create_superuser(
+            username="sec_superuser",
+            password="password123",
+            email="sec_superuser@example.com",
+        )
+        self.staff_admin = User.objects.create_user(
+            username="sec_staff",
+            password="password123",
+            email="sec_staff@example.com",
+            is_staff=True,
+        )
+        self.normal_user = User.objects.create_user(
+            username="sec_normal",
+            password="password123",
+            email="sec_normal@example.com",
+        )
+        self.owner_a = User.objects.create_user(
+            username="sec_owner_a",
+            password="password123",
+            email="sec_owner_a@example.com",
+        )
+        self.editor_a = User.objects.create_user(
+            username="sec_editor_a",
+            password="password123",
+            email="sec_editor_a@example.com",
+        )
+        self.viewer_a = User.objects.create_user(
+            username="sec_viewer_a",
+            password="password123",
+            email="sec_viewer_a@example.com",
+        )
+        self.unrelated_user = User.objects.create_user(
+            username="sec_unrelated",
+            password="password123",
+            email="sec_unrelated@example.com",
+        )
+
+        # Project A
+        self.project_a = Project.objects.create(
+            owner=self.owner_a,
+            title="Project A Security Analysis",
+            description="Testing authorization fences.",
+        )
+        ProjectMember.objects.create(
+            project=self.project_a, user=self.editor_a, role=ProjectMember.ROLE_EDITOR
+        )
+        ProjectMember.objects.create(
+            project=self.project_a, user=self.viewer_a, role=ProjectMember.ROLE_VIEWER
+        )
+
+        # Papers in Project A
+        self.paper_a1 = Paper.objects.create(
+            project=self.project_a,
+            title="Paper A1",
+            file="papers/paper_a1.pdf",
+            extracted_text="CONFIDENTIAL_TEXT_PROJECT_A1",
+        )
+        self.chunk_a1 = PaperChunk.objects.create(
+            paper=self.paper_a1,
+            chunk_index=0,
+            page_number=1,
+            text="CONFIDENTIAL_CHUNK_TEXT_A1",
+            embedding=[0.01, 0.02, 0.03],
+        )
+
+        self.paper_a2 = Paper.objects.create(
+            project=self.project_a,
+            title="Paper A2",
+            file="papers/paper_a2.pdf",
+            extracted_text="CONFIDENTIAL_TEXT_PROJECT_A2",
+        )
+
+        # Research Session in Project A
+        self.session_a = ResearchSession.objects.create(
+            project=self.project_a,
+            title="Session A",
+        )
+        self.session_a.papers.add(self.paper_a1, self.paper_a2)
+
+        self.msg_a = ResearchMessage.objects.create(
+            session=self.session_a,
+            role=ResearchMessage.ROLE_ASSISTANT,
+            content='{"themes": ["Security", "Hardening"]}',
+        )
+        self.evidence_a = ResearchEvidence.objects.create(
+            message=self.msg_a,
+            paper=self.paper_a1,
+            chunk=self.chunk_a1,
+            page_number=1,
+            text="CONFIDENTIAL_EVIDENCE_TEXT_A1",
+        )
+
+        # Project B (isolated project belonging to unrelated user)
+        self.project_b = Project.objects.create(
+            owner=self.unrelated_user,
+            title="Project B Isolated",
+            description="Completely foreign project.",
+        )
+        self.paper_b1 = Paper.objects.create(
+            project=self.project_b,
+            title="Paper B1 Foreign",
+            file="papers/paper_b1.pdf",
+            extracted_text="CONFIDENTIAL_TEXT_PROJECT_B1",
+        )
+        self.session_b = ResearchSession.objects.create(
+            project=self.project_b,
+            title="Session B Foreign",
+        )
+        self.session_b.papers.add(self.paper_b1)
+
+        # All admin endpoints
+        self.admin_endpoints = [
+            "/api/admin/dashboard/",
+            "/api/admin/users/",
+            f"/api/admin/users/{self.normal_user.id}/",
+            "/api/admin/projects/",
+            f"/api/admin/projects/{self.project_a.id}/",
+            "/api/admin/papers/",
+            f"/api/admin/papers/{self.paper_a1.id}/",
+            "/api/admin/activity/",
+            f"/api/admin/activity/{self.msg_a.id}/",
+            "/api/admin/ai-usage/",
+        ]
+
+    def test_admin_authorization_matrix_all_endpoints(self):
+        """
+        Verify that all 10 admin endpoints reject unauthenticated users with 401,
+        reject non-admin roles (normal user, project owner, editor, viewer) with 403,
+        and allow staff and superusers with 200.
+        """
+        non_admin_users = [
+            self.normal_user,
+            self.owner_a,
+            self.editor_a,
+            self.viewer_a,
+            self.unrelated_user,
+        ]
+
+        for url in self.admin_endpoints:
+            # 1. Unauthenticated -> 401
+            self.client.force_authenticate(user=None)
+            res_anon = self.client.get(url)
+            self.assertEqual(
+                res_anon.status_code,
+                status.HTTP_401_UNAUTHORIZED,
+                f"URL '{url}' should return 401 for anonymous request",
+            )
+
+            # 2. Non-admin users -> 403
+            for user in non_admin_users:
+                self.client.force_authenticate(user=user)
+                res_non_admin = self.client.get(url)
+                self.assertEqual(
+                    res_non_admin.status_code,
+                    status.HTTP_403_FORBIDDEN,
+                    f"URL '{url}' should return 403 for user '{user.username}'",
+                )
+
+            # 3. Staff -> 200
+            self.client.force_authenticate(user=self.staff_admin)
+            res_staff = self.client.get(url)
+            self.assertEqual(
+                res_staff.status_code,
+                status.HTTP_200_OK,
+                f"URL '{url}' should return 200 for staff admin",
+            )
+
+            # 4. Superuser -> 200
+            self.client.force_authenticate(user=self.superuser)
+            res_super = self.client.get(url)
+            self.assertEqual(
+                res_super.status_code,
+                status.HTTP_200_OK,
+                f"URL '{url}' should return 200 for superuser",
+            )
+
+    def test_admin_idor_nonexistent_ids_return_404(self):
+        """Admin detail endpoints return 404 for nonexistent IDs."""
+        self.client.force_authenticate(user=self.staff_admin)
+        nonexistent_urls = [
+            "/api/admin/users/999999/",
+            "/api/admin/projects/999999/",
+            "/api/admin/papers/999999/",
+            "/api/admin/activity/999999/",
+        ]
+        for url in nonexistent_urls:
+            res = self.client.get(url)
+            self.assertEqual(
+                res.status_code,
+                status.HTTP_404_NOT_FOUND,
+                f"URL '{url}' should return 404 for nonexistent ID",
+            )
+
+    def test_admin_idor_unauthorized_users_receive_403_without_object_leak(self):
+        """Non-admin users receive 403 on valid and nonexistent IDs alike without leaking existence."""
+        for user in [self.normal_user, self.owner_a, self.editor_a, self.viewer_a]:
+            self.client.force_authenticate(user=user)
+            # Valid ID
+            res_valid = self.client.get(f"/api/admin/projects/{self.project_a.id}/")
+            self.assertEqual(res_valid.status_code, status.HTTP_403_FORBIDDEN)
+            # Nonexistent ID
+            res_invalid = self.client.get("/api/admin/projects/999999/")
+            self.assertEqual(res_invalid.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_admin_data_exposure_prevention(self):
+        """
+        Admin API responses must never leak passwords, tokens, extracted PDF text,
+        chunk text, embeddings, or message/evidence bodies.
+        """
+        self.client.force_authenticate(user=self.staff_admin)
+
+        detail_urls = [
+            f"/api/admin/users/{self.owner_a.id}/",
+            f"/api/admin/projects/{self.project_a.id}/",
+            f"/api/admin/papers/{self.paper_a1.id}/",
+            f"/api/admin/activity/{self.msg_a.id}/",
+        ]
+
+        for url in detail_urls:
+            res = self.client.get(url)
+            self.assertEqual(res.status_code, status.HTTP_200_OK)
+            payload_str = str(res.data)
+
+            # Strict exclusion of sensitive strings
+            self.assertNotIn("CONFIDENTIAL_TEXT_PROJECT_A1", payload_str)
+            self.assertNotIn("CONFIDENTIAL_CHUNK_TEXT_A1", payload_str)
+            self.assertNotIn("CONFIDENTIAL_EVIDENCE_TEXT_A1", payload_str)
+            self.assertNotIn("password", payload_str.lower())
+            self.assertNotIn("auth_token", payload_str.lower())
+            self.assertNotIn("embedding", payload_str.lower())
+
+    def test_collaboration_security_unauthorized_actions(self):
+        """
+        Verify collaboration permission boundaries:
+        - Only project owner can invite (403 for editors, viewers, outsiders)
+        - Only project owner can remove members (403 for editors, viewers)
+        - Owner cannot remove themselves (400)
+        - Owner cannot leave project (400)
+        - Non-invited user cannot accept or decline invitations (403)
+        - Non-owner cannot cancel invitations (403)
+        """
+        # 1. Editor cannot invite
+        self.client.force_authenticate(user=self.editor_a)
+        res_invite_editor = self.client.post(
+            f"/api/projects/{self.project_a.id}/members/invite/",
+            {"username": self.unrelated_user.username, "role": "EDITOR"},
+            format="json",
+        )
+        self.assertEqual(res_invite_editor.status_code, status.HTTP_403_FORBIDDEN)
+
+        # 2. Viewer cannot invite
+        self.client.force_authenticate(user=self.viewer_a)
+        res_invite_viewer = self.client.post(
+            f"/api/projects/{self.project_a.id}/members/invite/",
+            {"username": self.unrelated_user.username, "role": "VIEWER"},
+            format="json",
+        )
+        self.assertEqual(res_invite_viewer.status_code, status.HTTP_403_FORBIDDEN)
+
+        # 3. Owner creates invitation for unrelated_user
+        self.client.force_authenticate(user=self.owner_a)
+        res_invite = self.client.post(
+            f"/api/projects/{self.project_a.id}/members/invite/",
+            {"username": self.unrelated_user.username, "role": "EDITOR"},
+            format="json",
+        )
+        self.assertEqual(res_invite.status_code, status.HTTP_201_CREATED)
+        invitation_id = res_invite.data["id"]
+
+        # 4. Another user cannot accept the invitation
+        self.client.force_authenticate(user=self.editor_a)
+        res_bad_accept = self.client.post(f"/api/projects/invitations/{invitation_id}/accept/")
+        self.assertEqual(res_bad_accept.status_code, status.HTTP_403_FORBIDDEN)
+
+        # 5. Non-owner cannot cancel the invitation
+        self.client.force_authenticate(user=self.editor_a)
+        res_bad_cancel = self.client.post(f"/api/projects/invitations/{invitation_id}/cancel/")
+        self.assertEqual(res_bad_cancel.status_code, status.HTTP_403_FORBIDDEN)
+
+        # 6. Owner CAN cancel the invitation
+        self.client.force_authenticate(user=self.owner_a)
+        res_cancel = self.client.post(f"/api/projects/invitations/{invitation_id}/cancel/")
+        self.assertEqual(res_cancel.status_code, status.HTTP_200_OK)
+
+        # 7. Owner cannot leave project
+        res_owner_leave = self.client.post(f"/api/projects/{self.project_a.id}/leave/")
+        self.assertEqual(res_owner_leave.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # 8. Owner cannot remove themselves as a member
+        res_remove_owner = self.client.delete(
+            f"/api/projects/{self.project_a.id}/members/{self.owner_a.id}/"
+        )
+        self.assertEqual(res_remove_owner.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # 9. Editor cannot remove viewer
+        self.client.force_authenticate(user=self.editor_a)
+        res_editor_remove = self.client.delete(
+            f"/api/projects/{self.project_a.id}/members/{self.viewer_a.id}/"
+        )
+        self.assertEqual(res_editor_remove.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_research_session_security_and_viewer_boundaries(self):
+        """
+        Verify research session boundaries:
+        - Viewers cannot create, update, or delete sessions (403)
+        - Viewers CAN read existing sessions (200)
+        - Users cannot access another project's sessions (403)
+        - Query project_id mismatch is rejected (400)
+        """
+        # 1. Viewer cannot create research session
+        self.client.force_authenticate(user=self.viewer_a)
+        res_create = self.client.post(
+            "/api/ai/sessions/",
+            {"project_id": self.project_a.id, "title": "Unauthorized Session"},
+            format="json",
+        )
+        self.assertEqual(res_create.status_code, status.HTTP_403_FORBIDDEN)
+
+        # 2. Viewer cannot rename research session
+        res_rename = self.client.patch(
+            f"/api/ai/sessions/{self.session_a.id}/",
+            {"title": "Renamed by Viewer"},
+            format="json",
+        )
+        self.assertEqual(res_rename.status_code, status.HTTP_403_FORBIDDEN)
+
+        # 3. Viewer cannot delete research session
+        res_delete = self.client.delete(f"/api/ai/sessions/{self.session_a.id}/")
+        self.assertEqual(res_delete.status_code, status.HTTP_403_FORBIDDEN)
+
+        # 4. Viewer CAN read research session
+        res_get = self.client.get(f"/api/ai/sessions/{self.session_a.id}/")
+        self.assertEqual(res_get.status_code, status.HTTP_200_OK)
+
+        # 5. Cross-project session access: Owner A cannot read Session B
+        self.client.force_authenticate(user=self.owner_a)
+        res_foreign_session = self.client.get(f"/api/ai/sessions/{self.session_b.id}/")
+        self.assertEqual(res_foreign_session.status_code, status.HTTP_403_FORBIDDEN)
+
+        # 6. Session/project mismatch query parameter
+        res_mismatch = self.client.get(
+            f"/api/ai/sessions/{self.session_a.id}/?project_id={self.project_b.id}"
+        )
+        self.assertEqual(res_mismatch.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_ai_endpoint_viewer_rejection_and_mixed_paper_boundaries(self):
+        """
+        Verify AI endpoint protections:
+        - Viewers receive 403 on all generation endpoints
+        - Mixed papers across projects are rejected (400 or 403)
+        - Session paper from different project is rejected (400)
+        """
+        self.client.force_authenticate(user=self.viewer_a)
+
+        # 1. Summary rejected for viewer
+        res_summary = self.client.post(
+            "/api/ai/summary/",
+            {"paper_id": self.paper_a1.id},
+            format="json",
+        )
+        self.assertEqual(res_summary.status_code, status.HTTP_403_FORBIDDEN)
+
+        # 2. Ask rejected for viewer
+        res_ask = self.client.post(
+            "/api/ai/ask/",
+            {"paper_id": self.paper_a1.id, "question": "What is tested?"},
+            format="json",
+        )
+        self.assertEqual(res_ask.status_code, status.HTTP_403_FORBIDDEN)
+
+        # 3. Compare rejected for viewer
+        res_compare = self.client.post(
+            "/api/ai/compare/",
+            {"paper_ids": [self.paper_a1.id, self.paper_a2.id], "question": "Compare"},
+            format="json",
+        )
+        self.assertEqual(res_compare.status_code, status.HTTP_403_FORBIDDEN)
+
+        # 4. Gap analysis rejected for viewer
+        res_gap = self.client.post(
+            "/api/ai/gap-analysis/",
+            {"paper_ids": [self.paper_a1.id, self.paper_a2.id]},
+            format="json",
+        )
+        self.assertEqual(res_gap.status_code, status.HTTP_403_FORBIDDEN)
+
+        # 5. Thematic analysis rejected for viewer
+        res_thematic = self.client.post(
+            "/api/ai/thematic-analysis/",
+            {"paper_ids": [self.paper_a1.id, self.paper_a2.id]},
+            format="json",
+        )
+        self.assertEqual(res_thematic.status_code, status.HTTP_403_FORBIDDEN)
+
+        # 6. Trends rejected for viewer
+        res_trends = self.client.post(
+            "/api/ai/research-trends/",
+            {"paper_ids": [self.paper_a1.id, self.paper_a2.id]},
+            format="json",
+        )
+        self.assertEqual(res_trends.status_code, status.HTTP_403_FORBIDDEN)
+
+        # 7. Owner A attempting mixed-project papers (Paper A1 and Paper B1)
+        self.client.force_authenticate(user=self.owner_a)
+        res_mixed_compare = self.client.post(
+            "/api/ai/compare/",
+            {"paper_ids": [self.paper_a1.id, self.paper_b1.id], "question": "Compare"},
+            format="json",
+        )
+        # Foreign paper B1 results in 403 or 400
+        self.assertIn(res_mixed_compare.status_code, [status.HTTP_400_BAD_REQUEST, status.HTTP_403_FORBIDDEN])
+
+        # 8. Single paper ask with paper from Project A and session from Project B
+        res_mismatched_session = self.client.post(
+            "/api/ai/ask/",
+            {
+                "paper_id": self.paper_a1.id,
+                "question": "Question?",
+                "session_id": self.session_b.id,
+            },
+            format="json",
+        )
+        # User lacks access to session_b, returning 403 or 400
+        self.assertIn(
+            res_mismatched_session.status_code,
+            [status.HTTP_400_BAD_REQUEST, status.HTTP_403_FORBIDDEN],
+        )
+
 
 
 

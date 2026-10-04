@@ -379,6 +379,10 @@ class AdminActivityDetailSerializer(serializers.ModelSerializer):
     user_role = serializers.SerializerMethodField()
     operation = serializers.SerializerMethodField()
     operation_name = serializers.SerializerMethodField()
+    operation_type = serializers.SerializerMethodField()
+    operation_display_name = serializers.SerializerMethodField()
+    message_role = serializers.CharField(source='role', read_only=True)
+    timestamp = serializers.DateTimeField(source='created_at', read_only=True)
     evidence_count = serializers.SerializerMethodField()
     has_evidence = serializers.SerializerMethodField()
     status = serializers.SerializerMethodField()
@@ -399,8 +403,11 @@ class AdminActivityDetailSerializer(serializers.ModelSerializer):
             'username',
             'user_role',
             'role',
+            'message_role',
             'operation',
             'operation_name',
+            'operation_type',
+            'operation_display_name',
             'evidence_count',
             'has_evidence',
             'status',
@@ -408,6 +415,7 @@ class AdminActivityDetailSerializer(serializers.ModelSerializer):
             'citations',
             'privacy_notice',
             'created_at',
+            'timestamp',
         ]
         read_only_fields = fields
 
@@ -431,6 +439,12 @@ class AdminActivityDetailSerializer(serializers.ModelSerializer):
     def get_operation_name(self, obj):
         _, op_name = classify_operation(obj.content)
         return op_name
+
+    def get_operation_type(self, obj):
+        return self.get_operation(obj)
+
+    def get_operation_display_name(self, obj):
+        return self.get_operation_name(obj)
 
     def get_evidence_count(self, obj):
         if hasattr(obj, '_prefetched_objects_cache') and 'evidence' in obj._prefetched_objects_cache:
