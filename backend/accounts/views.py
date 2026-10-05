@@ -14,6 +14,9 @@ class LoginView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
+        if not isinstance(request.data, dict):
+            return Response({"error": "Invalid Credentials"}, status=status.HTTP_400_BAD_REQUEST)
+
         username = request.data.get("username")
         password = request.data.get("password")
         
@@ -32,7 +35,13 @@ class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        request.user.auth_token.delete()
+        try:
+            if hasattr(request.user, 'auth_token'):
+                request.user.auth_token.delete()
+            elif request.auth and hasattr(request.auth, 'delete'):
+                request.auth.delete()
+        except Exception:
+            pass
         return Response({"success": "Successfully logged out."}, status=status.HTTP_200_OK)
 
 class CurrentUserView(APIView):
