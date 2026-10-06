@@ -8,6 +8,7 @@ import ProjectDetails from "./pages/ProjectDetails";
 import PaperDetails from "./pages/PaperDetails";
 import MultiPaperComparison from "./pages/MultiPaperComparison";
 import ResearchWorkspace from "./pages/ResearchWorkspace";
+import Friends from "./pages/Friends";
 import { useContext } from 'react';
 import { AuthProvider, AuthContext } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
@@ -39,6 +40,7 @@ function App() {
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
               <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/friends" element={<Friends />} />
               <Route path="/backend-test" element={<BackendTest />} />
               <Route path="/projects" element={<Projects />} />
               <Route path="/projects/:id" element={<ProjectDetails />} />

@@ -1,0 +1,82 @@
+.paper-details-container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 1rem 1rem 3rem 1rem;
+}
+
+.paper-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1.5rem;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.paper-title-area {
+  flex: 1;
+  min-width: 280px;
+}
+
+.paper-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* Two Column Layout */
+.paper-two-col-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(380px, 1fr);
+  gap: 2rem;
+  align-items: start;
+}
+
+.paper-left-column {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.paper-right-column {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  position: sticky;
+  top: 5rem;
+  max-height: calc(100vh - 6rem);
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+/* Scrollbar polish for sticky right panel */
+.paper-right-column::-webkit-scrollbar {
+  width: 6px;
+}
+
+.paper-right-column::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.paper-right-column::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: var(--radius-full);
+}
+
+.paper-right-column::-webkit-scrollbar-thumb:hover {
+  background: var(--border-hover);
+}
+
+/* Responsive behavior */
+@media (max-width: 1024px) {
+  .paper-two-col-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .paper-right-column {
+    position: static;
+    max-height: none;
+    overflow-y: visible;
+    padding-right: 0;
+  }
+}

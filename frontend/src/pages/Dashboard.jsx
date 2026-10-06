@@ -142,7 +142,9 @@ const Dashboard = () => {
             )}
 
             {/* Pending Invitations Banner */}
-            <ProjectInvitations onAccepted={fetchDashboardData} />
+            <div id="project-invitations-section">
+                <ProjectInvitations onAccepted={fetchDashboardData} />
+            </div>
 
             {/* Metrics Overview Strip */}
             <section className="dashboard-stats-grid">

@@ -1,4 +1,4 @@
-import { useEffect, useState, useContext, useCallback } from "react";
+import { useEffect, useState, useContext } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import api from "../services/api";
 import { AuthContext } from "../context/AuthContext";
@@ -11,6 +11,7 @@ import {
     removeProjectMember,
     determineUserRole,
 } from "../services/collaboration";
+import { getFriends } from "../services/friends";
 import "./ProjectDetails.css";
 
 function ProjectDetails() {
@@ -28,7 +29,8 @@ function ProjectDetails() {
 
     // Collaboration state
     const [members, setMembers] = useState([]);
-    const [loadingMembers, setLoadingMembers] = useState(false);
+    const [friendsList, setFriendsList] = useState([]);
+    const [selectedFriend, setSelectedFriend] = useState("");
     const [inviteUsername, setInviteUsername] = useState("");
     const [inviteRole, setInviteRole] = useState("VIEWER");
     const [inviting, setInviting] = useState(false);
@@ -55,7 +57,6 @@ function ProjectDetails() {
     const isOwner = Boolean(user && project && project.owner === user.username);
     const currentRole = determineUserRole(project, user, members);
     const isEditor = currentRole === "EDITOR";
-    const isViewer = currentRole === "VIEWER";
     const canEditContent = isOwner || isEditor;
 
     const handleSaveTitle = async () => {
@@ -128,6 +129,13 @@ function ProjectDetails() {
             await fetchPapers();
             await fetchMembers();
 
+            try {
+                const friendsData = await getFriends();
+                setFriendsList(friendsData.friends || []);
+            } catch {
+                // Ignore if friends could not be fetched
+            }
+
             setLoading(false);
         };
 
@@ -135,12 +143,26 @@ function ProjectDetails() {
     }, [id]);
 
     const handleInvite = async (e) => {
-        e.preventDefault();
+        e?.preventDefault();
         const trimmed = inviteUsername.trim();
         if (!trimmed) {
-            setInviteError("Please enter a username to invite.");
+            setInviteError("Please select a friend or enter a username to invite.");
             return;
         }
+
+        if (user && trimmed.toLowerCase() === user.username.toLowerCase()) {
+            setInviteError("You cannot invite yourself.");
+            return;
+        }
+
+        if (
+            members.some((m) => m.username.toLowerCase() === trimmed.toLowerCase()) ||
+            (project && project.owner && project.owner.toLowerCase() === trimmed.toLowerCase())
+        ) {
+            setInviteError("This user is already a collaborator on this project.");
+            return;
+        }
+
         try {
             setInviting(true);
             setInviteError("");
@@ -149,6 +171,7 @@ function ProjectDetails() {
             await inviteMember(id, trimmed, inviteRole);
             setInviteSuccess(`Invitation sent to @${trimmed} as ${inviteRole}.`);
             setInviteUsername("");
+            setSelectedFriend("");
             setInviteRole("VIEWER");
         } catch (err) {
             console.error("Failed to invite collaborator", err);
@@ -869,7 +892,7 @@ function ProjectDetails() {
                     {/* Invite Form (Owner Only) */}
                     {isOwner && (
                         <div className="invite-panel">
-                            <h4 className="invite-panel-title">Invite Member</h4>
+                            <h4 className="invite-panel-title">Add Collaborator</h4>
 
                             {inviteSuccess && (
                                 <div className="collaboration-alert success">{inviteSuccess}</div>
@@ -878,22 +901,74 @@ function ProjectDetails() {
                                 <div className="collaboration-alert error">{inviteError}</div>
                             )}
 
+                            {/* Friends Section */}
+                            <div className="invite-friends-section">
+                                <span className="invite-section-subtitle">Friends</span>
+                                {friendsList.length === 0 ? (
+                                    <p className="invite-no-friends-text">
+                                        No friends yet. You can search registered users below or add friends in the Friends menu.
+                                    </p>
+                                ) : (
+                                    <div className="invite-friends-options-list">
+                                        {friendsList.map((f) => {
+                                            const friendUser = f.user_username === user?.username ? f.friend_username : f.user_username;
+                                            const isAlreadyMember = members.some(
+                                                (m) => m.username.toLowerCase() === friendUser.toLowerCase()
+                                            ) || (project.owner && project.owner.toLowerCase() === friendUser.toLowerCase());
+
+                                            return (
+                                                <label 
+                                                    key={f.id} 
+                                                    className={`invite-friend-row ${selectedFriend === friendUser ? 'selected' : ''} ${isAlreadyMember ? 'disabled' : ''}`}
+                                                >
+                                                    <div className="invite-friend-radio-label">
+                                                        <input
+                                                            type="radio"
+                                                            name="invite_friend_select"
+                                                            value={friendUser}
+                                                            checked={selectedFriend === friendUser}
+                                                            disabled={isAlreadyMember || inviting}
+                                                            onChange={() => {
+                                                                setSelectedFriend(friendUser);
+                                                                setInviteUsername(friendUser);
+                                                                if (inviteError) setInviteError("");
+                                                            }}
+                                                        />
+                                                        <span className="invite-friend-username">@{friendUser}</span>
+                                                    </div>
+                                                    {isAlreadyMember && (
+                                                        <span className="invite-member-status">Member</span>
+                                                    )}
+                                                </label>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+
                             <form onSubmit={handleInvite} className="invite-form">
-                                <Input
-                                    label="Username"
-                                    id="invite-username"
-                                    type="text"
-                                    value={inviteUsername}
-                                    onChange={(e) => {
-                                        setInviteUsername(e.target.value);
-                                        if (inviteError) setInviteError("");
-                                    }}
-                                    placeholder="Enter collaborator username"
-                                    disabled={inviting}
-                                />
+                                <div className="invite-search-section">
+                                    <label htmlFor="invite-username" className="invite-section-subtitle">
+                                        Search registered users
+                                    </label>
+                                    <Input
+                                        id="invite-username"
+                                        type="text"
+                                        value={inviteUsername}
+                                        onChange={(e) => {
+                                            setInviteUsername(e.target.value);
+                                            setSelectedFriend("");
+                                            if (inviteError) setInviteError("");
+                                        }}
+                                        placeholder="Enter registered username"
+                                        disabled={inviting}
+                                    />
+                                </div>
 
                                 <div className="invite-select-group">
-                                    <label htmlFor="invite-role">Role</label>
+                                    <label htmlFor="invite-role" className="invite-section-subtitle">
+                                        Role
+                                    </label>
                                     <select
                                         id="invite-role"
                                         className="invite-select"
@@ -901,14 +976,29 @@ function ProjectDetails() {
                                         onChange={(e) => setInviteRole(e.target.value)}
                                         disabled={inviting}
                                     >
-                                        <option value="VIEWER">Viewer (Read-only access)</option>
-                                        <option value="EDITOR">Editor (Can edit papers & sessions)</option>
+                                        <option value="VIEWER">Viewer</option>
+                                        <option value="EDITOR">Editor</option>
                                     </select>
                                 </div>
 
-                                <Button type="submit" disabled={inviting || !inviteUsername.trim()}>
-                                    {inviting ? "Sending Invite..." : "Invite Member"}
-                                </Button>
+                                <div className="invite-buttons-row">
+                                    <Button
+                                        type="button"
+                                        variant="secondary"
+                                        onClick={() => {
+                                            setInviteUsername("");
+                                            setSelectedFriend("");
+                                            setInviteError("");
+                                            setInviteSuccess("");
+                                        }}
+                                        disabled={inviting}
+                                    >
+                                        Cancel
+                                    </Button>
+                                    <Button type="submit" disabled={inviting || !inviteUsername.trim()}>
+                                        {inviting ? "Inviting..." : "Invite"}
+                                    </Button>
+                                </div>
                             </form>
                         </div>
                     )}

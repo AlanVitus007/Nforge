@@ -1,5 +1,6 @@
 from django.contrib.auth.models import User
 from rest_framework import serializers
+from .models import Friendship
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
@@ -21,3 +22,16 @@ class RegisterSerializer(serializers.ModelSerializer):
             password=validated_data['password']
         )
         return user
+
+class SafeUserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ('id', 'username', 'email')
+
+class FriendshipSerializer(serializers.ModelSerializer):
+    user = SafeUserSerializer(read_only=True)
+    friend = SafeUserSerializer(read_only=True)
+
+    class Meta:
+        model = Friendship
+        fields = ('id', 'user', 'friend', 'status', 'created_at', 'updated_at')

@@ -502,6 +502,7 @@ function ResearchWorkspace() {
     const [sessions, setSessions] = useState([]);
     const [activeSessionId, setActiveSessionId] = useState(null);
     const [activeSession, setActiveSession] = useState(null);
+    const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
     // Papers Management Modal state
     const [isPapersModalOpen, setIsPapersModalOpen] = useState(false);
@@ -545,7 +546,6 @@ function ResearchWorkspace() {
     // Loading & Action states
     const [userRole, setUserRole] = useState("VIEWER");
     const isViewer = userRole === "VIEWER";
-    const canEditResearch = userRole === "OWNER" || userRole === "EDITOR";
 
     const [loadingList, setLoadingList] = useState(true);
     const [loadingSession, setLoadingSession] = useState(false);
@@ -584,6 +584,7 @@ function ResearchWorkspace() {
     // Select and open an existing session (0 Gemini calls) with race condition protection
     const handleSelectSession = useCallback(async (sessionId) => {
         currentSelectIdRef.current = sessionId;
+        setIsMobileSidebarOpen(false);
         try {
             setActiveSessionId(sessionId);
             setActiveSession(null); // Clear previous session messages immediately so Session A does not linger
@@ -717,6 +718,7 @@ function ResearchWorkspace() {
     // Create a new session (0 Gemini calls)
     const handleCreateSession = async () => {
         if (creatingSession || isViewer) return;
+        setIsMobileSidebarOpen(false);
         try {
             setCreatingSession(true);
             setActionError('');
@@ -2336,11 +2338,34 @@ function ResearchWorkspace() {
                     &larr; Back to {project ? project.title : 'Project'}
                 </Link>
 
-                <div className="workspace-project-pill">
-                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--accent-primary)' }}></span>
-                    <span>Research Workspace</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <button
+                        className="mobile-sidebar-toggle-btn"
+                        onClick={() => setIsMobileSidebarOpen((prev) => !prev)}
+                        aria-label="Toggle sessions history"
+                        type="button"
+                    >
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="12 6 12 12 16 14"></polyline>
+                        </svg>
+                        <span>Sessions ({sessions.length})</span>
+                    </button>
+
+                    <div className="workspace-project-pill">
+                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--accent-primary)' }}></span>
+                        <span>Research Workspace</span>
+                    </div>
                 </div>
             </header>
+
+            {isMobileSidebarOpen && (
+                <div 
+                    className="mobile-sidebar-backdrop" 
+                    onClick={() => setIsMobileSidebarOpen(false)}
+                    aria-hidden="true"
+                />
+            )}
 
             {actionError && (
                 <div className="alert-box error" style={{ marginBottom: '1.25rem' }}>
@@ -2351,7 +2376,7 @@ function ResearchWorkspace() {
             {/* 2-Column Responsive Workspace Grid */}
             <div className="workspace-grid">
                 {/* Left Column: Sessions History Sidebar */}
-                <aside className="workspace-sidebar">
+                <aside className={`workspace-sidebar ${isMobileSidebarOpen ? 'mobile-open' : ''}`}>
                     <div className="sidebar-header">
                         <div className="sidebar-title-row">
                             <h3 className="sidebar-heading">
@@ -3029,9 +3054,15 @@ function ResearchWorkspace() {
                                                 <div className="chat-input-row">
                                                     <textarea
                                                         className="chat-textarea"
-                                                        placeholder={isViewer ? "Read-only access — cross-paper comparisons are disabled for viewers." : "What would you like to compare? e.g. methodology, findings, limitations, and research gaps"}
+                                                        placeholder={isViewer ? "Read-only access — cross-paper comparisons are disabled for viewers." : "What would you like to compare? e.g. methodology, findings, limitations, and research gaps (Shift+Enter for newline)"}
                                                         value={comparisonQuestion}
                                                         onChange={(e) => setComparisonQuestion(e.target.value)}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter' && !e.shiftKey) {
+                                                                e.preventDefault();
+                                                                handleGenerateComparison();
+                                                            }
+                                                        }}
                                                         disabled={isViewer || loadingTrend || loadingThematic || loadingCompare || loadingGap || loadingAsk}
                                                         rows={2}
                                                     />
@@ -3231,9 +3262,15 @@ function ResearchWorkspace() {
                                                 <div className="chat-input-row">
                                                     <textarea
                                                         className="chat-textarea"
-                                                        placeholder={isViewer ? "Read-only access — thematic analysis is disabled for viewers." : "Identify the major themes, recurring concepts, and important cross-paper patterns across these papers..."}
+                                                        placeholder={isViewer ? "Read-only access — thematic analysis is disabled for viewers." : "Identify the major themes, recurring concepts, and important cross-paper patterns across these papers... (Shift+Enter for newline)"}
                                                         value={thematicQuestion}
                                                         onChange={(e) => setThematicQuestion(e.target.value)}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter' && !e.shiftKey) {
+                                                                e.preventDefault();
+                                                                handleGenerateThematicAnalysis();
+                                                            }
+                                                        }}
                                                         disabled={isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk}
                                                         rows={2}
                                                     />
@@ -3329,9 +3366,15 @@ function ResearchWorkspace() {
                                                 <div className="chat-input-row">
                                                     <textarea
                                                         className="chat-textarea"
-                                                        placeholder={isViewer ? "Read-only access — research trend analysis is disabled for viewers." : "Analyze how research has evolved across these papers, including changes in methods, approaches, research focus, emerging directions, and future research."}
+                                                        placeholder={isViewer ? "Read-only access — research trend analysis is disabled for viewers." : "Analyze how research has evolved across these papers, including changes in methods, approaches, research focus, emerging directions, and future research. (Shift+Enter for newline)"}
                                                         value={trendQuestion}
                                                         onChange={(e) => setTrendQuestion(e.target.value)}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter' && !e.shiftKey) {
+                                                                e.preventDefault();
+                                                                handleGenerateTrendAnalysis();
+                                                            }
+                                                        }}
                                                         disabled={isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk}
                                                         rows={2}
                                                     />

@@ -5,6 +5,7 @@ import { AuthContext } from "../context/AuthContext";
 import Card from "../components/Card";
 import Button from "../components/Button";
 import { getProjectMembers, determineUserRole } from "../services/collaboration";
+import "./PaperDetails.css";
 
 function PaperDetails() {
     const { projectId, paperId } = useParams();
@@ -526,17 +527,9 @@ function PaperDetails() {
                 )}
             </div>
 
-            <div
-                style={{
-                    display: "grid",
-                    gridTemplateColumns:
-                        "minmax(0, 1.5fr) minmax(320px, 1fr)",
-                    gap: "2rem",
-                    alignItems: "start",
-                }}
-            >
-                {/* PDF */}
-                <section>
+            <div className="paper-two-col-layout">
+                {/* PDF & Paper Information */}
+                <section className="paper-left-column">
                     {paper.file ? (
                         <Card
                             id="paper-pdf-viewer"
@@ -608,7 +601,7 @@ function PaperDetails() {
                 </section>
 
                 {/* AI WORKSPACE */}
-                <section>
+                <section className="paper-right-column">
                     <div
                         style={{
                             display: "flex",
@@ -647,218 +640,6 @@ function PaperDetails() {
                                 Ask questions and receive answers based on
                                 the contents of this paper.
                             </p>
-                        </Card>
-
-                        {/* SUMMARY */}
-                        <Card>
-                            <h3
-                                style={{
-                                    margin: "0 0 1rem 0",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "0.5rem",
-                                }}
-                            >
-                                <span style={{ fontSize: "1.25rem" }}>
-                                    📝
-                                </span>
-                                Summary
-                            </h3>
-
-                            {!summaryData && !summaryLoading && !summaryError && (
-                                <div style={{ textAlign: "center", padding: "1.5rem 0" }}>
-                                    <p style={{ color: "var(--text-secondary)", marginBottom: "1rem" }}>
-                                        Generate an AI-powered academic summary of this paper.
-                                    </p>
-                                    <Button
-                                        variant="primary"
-                                        onClick={handleGenerateSummary}
-                                        disabled={summaryLoading}
-                                    >
-                                        Generate Summary
-                                    </Button>
-                                </div>
-                            )}
-
-                            {summaryLoading && (
-                                <div style={{ textAlign: "center", padding: "2rem" }}>
-                                    <p style={{ color: "var(--text-secondary)", margin: 0 }}>
-                                        Reading the paper and generating summary...
-                                    </p>
-                                </div>
-                            )}
-
-                            {summaryError && (
-                                <div style={{ marginTop: "1rem" }}>
-                                    <p style={{ color: "var(--danger)", marginBottom: "1rem" }}>
-                                        {summaryError}
-                                    </p>
-                                    <Button
-                                        variant="secondary"
-                                        onClick={handleGenerateSummary}
-                                        disabled={summaryLoading}
-                                    >
-                                        Try Again
-                                    </Button>
-                                </div>
-                            )}
-
-                            {summaryData && !summaryLoading && (
-                                <div
-                                    style={{
-                                        display: "flex",
-                                        flexDirection: "column",
-                                        gap: "1.25rem",
-                                    }}
-                                >
-                                    {/* Overview */}
-                                    <div style={{ background: "var(--bg-tertiary)", padding: "1rem", borderRadius: "var(--radius-md)" }}>
-                                        <h4 style={{ margin: "0 0 0.5rem 0", fontSize: "0.95rem", color: "var(--accent-primary)" }}>
-                                            Overview
-                                        </h4>
-                                        <p style={{ margin: 0, lineHeight: 1.6, color: "var(--text-primary)" }}>
-                                            {summaryData.overview}
-                                        </p>
-                                    </div>
-
-                                    {/* Key Points */}
-                                    {summaryData.key_points && summaryData.key_points.length > 0 && (
-                                        <div style={{ background: "var(--bg-tertiary)", padding: "1rem", borderRadius: "var(--radius-md)" }}>
-                                            <h4 style={{ margin: "0 0 0.5rem 0", fontSize: "0.95rem", color: "var(--accent-primary)" }}>
-                                                Key Points
-                                            </h4>
-                                            <ul style={{ margin: 0, paddingLeft: "1.25rem", lineHeight: 1.6, color: "var(--text-primary)" }}>
-                                                {summaryData.key_points.map((pt, idx) => (
-                                                    <li key={idx} style={{ marginBottom: "0.35rem" }}>
-                                                        {pt}
-                                                    </li>
-                                                ))}
-                                            </ul>
-                                        </div>
-                                    )}
-
-                                    {/* Methodology */}
-                                    <div style={{ background: "var(--bg-tertiary)", padding: "1rem", borderRadius: "var(--radius-md)" }}>
-                                        <h4 style={{ margin: "0 0 0.5rem 0", fontSize: "0.95rem", color: "var(--accent-primary)" }}>
-                                            Main Methodology / Approach
-                                        </h4>
-                                        <p style={{ margin: 0, lineHeight: 1.6, color: "var(--text-primary)" }}>
-                                            {summaryData.methodology}
-                                        </p>
-                                    </div>
-
-                                    {/* Findings */}
-                                    <div style={{ background: "var(--bg-tertiary)", padding: "1rem", borderRadius: "var(--radius-md)" }}>
-                                        <h4 style={{ margin: "0 0 0.5rem 0", fontSize: "0.95rem", color: "var(--accent-primary)" }}>
-                                            Main Findings / Results
-                                        </h4>
-                                        <p style={{ margin: 0, lineHeight: 1.6, color: "var(--text-primary)" }}>
-                                            {summaryData.findings}
-                                        </p>
-                                    </div>
-
-                                    {/* Limitations */}
-                                    <div style={{ background: "var(--bg-tertiary)", padding: "1rem", borderRadius: "var(--radius-md)" }}>
-                                        <h4 style={{ margin: "0 0 0.5rem 0", fontSize: "0.95rem", color: "var(--accent-primary)" }}>
-                                            Limitations / Future Work
-                                        </h4>
-                                        <p style={{ margin: 0, lineHeight: 1.6, color: "var(--text-primary)" }}>
-                                            {summaryData.limitations}
-                                        </p>
-                                    </div>
-
-                                    {/* Summary Sources */}
-                                    {summarySources.length > 0 && (
-                                        <div style={{ marginTop: "1rem", paddingTop: "1rem", borderTop: "1px solid var(--border-color)" }}>
-                                            <h4 style={{ margin: "0 0 0.75rem 0", fontSize: "0.95rem" }}>
-                                                Sources from the paper
-                                            </h4>
-                                            <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-                                                {summarySources.map((source) => {
-                                                    const isSelected =
-                                                        selectedEvidence?.chunkId != null &&
-                                                        selectedEvidence.chunkId === source.chunk_id;
-                                                    return (
-                                                        <div
-                                                            key={source.chunk_id}
-                                                            style={{
-                                                                padding: "0.75rem",
-                                                                border: isSelected
-                                                                    ? "2px solid var(--accent-primary)"
-                                                                    : "1px solid var(--border-color)",
-                                                                borderRadius: "var(--radius-md)",
-                                                                background: isSelected
-                                                                    ? "var(--bg-tertiary)"
-                                                                    : "var(--bg-secondary)",
-                                                                transition: "border-color 0.2s",
-                                                            }}
-                                                        >
-                                                            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.35rem", flexWrap: "wrap" }}>
-                                                                <strong>Source {source.source_number}</strong>
-                                                                {source.page_number != null ? (
-                                                                    <>
-                                                                        <span style={{ color: "var(--text-muted)", userSelect: "none" }}>·</span>
-                                                                        <button
-                                                                            title={`Jump to page ${source.page_number} in the PDF viewer`}
-                                                                            onClick={() => handleEvidenceClick(source)}
-                                                                            style={{
-                                                                                background: "none",
-                                                                                border: "none",
-                                                                                padding: 0,
-                                                                                cursor: "pointer",
-                                                                                color: "var(--accent-primary)",
-                                                                                fontWeight: 600,
-                                                                                fontSize: "inherit",
-                                                                                fontFamily: "inherit",
-                                                                                textDecoration: "underline",
-                                                                                textUnderlineOffset: "2px",
-                                                                            }}
-                                                                        >
-                                                                            Page {source.page_number}
-                                                                        </button>
-                                                                    </>
-                                                                ) : (
-                                                                    <span
-                                                                        style={{
-                                                                            color: "var(--text-muted)",
-                                                                            fontSize: "0.85em",
-                                                                        }}
-                                                                    >
-                                                                        · Page information unavailable
-                                                                    </span>
-                                                                )}
-                                                            </div>
-                                                            <p style={{ margin: 0, fontSize: "0.875rem", lineHeight: 1.5, color: "var(--text-secondary)" }}>
-                                                                {source.text}
-                                                            </p>
-                                                            {source.page_number != null && (
-                                                                <div style={{ marginTop: "0.5rem" }}>
-                                                                    <button
-                                                                        onClick={() => handleEvidenceClick(source)}
-                                                                        title={`Open evidence from page ${source.page_number}`}
-                                                                        style={{
-                                                                            background: "none",
-                                                                            border: "1px solid var(--border-color)",
-                                                                            borderRadius: "var(--radius-sm)",
-                                                                            color: "var(--accent-primary)",
-                                                                            cursor: "pointer",
-                                                                            fontSize: "0.8rem",
-                                                                            padding: "0.2rem 0.6rem",
-                                                                            fontWeight: 600,
-                                                                        }}
-                                                                    >
-                                                                        Open Evidence
-                                                                    </button>
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
                         </Card>
 
                         {/* ASK QUESTIONS */}
@@ -1114,6 +895,218 @@ function PaperDetails() {
                                                         );
                                                     }
                                                 )}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </Card>
+
+                        {/* SUMMARY */}
+                        <Card>
+                            <h3
+                                style={{
+                                    margin: "0 0 1rem 0",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "0.5rem",
+                                }}
+                            >
+                                <span style={{ fontSize: "1.25rem" }}>
+                                    📝
+                                </span>
+                                Summary
+                            </h3>
+
+                            {!summaryData && !summaryLoading && !summaryError && (
+                                <div style={{ textAlign: "center", padding: "1.5rem 0" }}>
+                                    <p style={{ color: "var(--text-secondary)", marginBottom: "1rem" }}>
+                                        Generate an AI-powered academic summary of this paper.
+                                    </p>
+                                    <Button
+                                        variant="primary"
+                                        onClick={handleGenerateSummary}
+                                        disabled={summaryLoading}
+                                    >
+                                        Generate Summary
+                                    </Button>
+                                </div>
+                            )}
+
+                            {summaryLoading && (
+                                <div style={{ textAlign: "center", padding: "2rem" }}>
+                                    <p style={{ color: "var(--text-secondary)", margin: 0 }}>
+                                        Reading the paper and generating summary...
+                                    </p>
+                                </div>
+                            )}
+
+                            {summaryError && (
+                                <div style={{ marginTop: "1rem" }}>
+                                    <p style={{ color: "var(--danger)", marginBottom: "1rem" }}>
+                                        {summaryError}
+                                    </p>
+                                    <Button
+                                        variant="secondary"
+                                        onClick={handleGenerateSummary}
+                                        disabled={summaryLoading}
+                                    >
+                                        Try Again
+                                    </Button>
+                                </div>
+                            )}
+
+                            {summaryData && !summaryLoading && (
+                                <div
+                                    style={{
+                                        display: "flex",
+                                        flexDirection: "column",
+                                        gap: "1.25rem",
+                                    }}
+                                >
+                                    {/* Overview */}
+                                    <div style={{ background: "var(--bg-tertiary)", padding: "1rem", borderRadius: "var(--radius-md)" }}>
+                                        <h4 style={{ margin: "0 0 0.5rem 0", fontSize: "0.95rem", color: "var(--accent-primary)" }}>
+                                            Overview
+                                        </h4>
+                                        <p style={{ margin: 0, lineHeight: 1.6, color: "var(--text-primary)" }}>
+                                            {summaryData.overview}
+                                        </p>
+                                    </div>
+
+                                    {/* Key Points */}
+                                    {summaryData.key_points && summaryData.key_points.length > 0 && (
+                                        <div style={{ background: "var(--bg-tertiary)", padding: "1rem", borderRadius: "var(--radius-md)" }}>
+                                            <h4 style={{ margin: "0 0 0.5rem 0", fontSize: "0.95rem", color: "var(--accent-primary)" }}>
+                                                Key Points
+                                            </h4>
+                                            <ul style={{ margin: 0, paddingLeft: "1.25rem", lineHeight: 1.6, color: "var(--text-primary)" }}>
+                                                {summaryData.key_points.map((pt, idx) => (
+                                                    <li key={idx} style={{ marginBottom: "0.35rem" }}>
+                                                        {pt}
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
+
+                                    {/* Methodology */}
+                                    <div style={{ background: "var(--bg-tertiary)", padding: "1rem", borderRadius: "var(--radius-md)" }}>
+                                        <h4 style={{ margin: "0 0 0.5rem 0", fontSize: "0.95rem", color: "var(--accent-primary)" }}>
+                                            Main Methodology / Approach
+                                        </h4>
+                                        <p style={{ margin: 0, lineHeight: 1.6, color: "var(--text-primary)" }}>
+                                            {summaryData.methodology}
+                                        </p>
+                                    </div>
+
+                                    {/* Findings */}
+                                    <div style={{ background: "var(--bg-tertiary)", padding: "1rem", borderRadius: "var(--radius-md)" }}>
+                                        <h4 style={{ margin: "0 0 0.5rem 0", fontSize: "0.95rem", color: "var(--accent-primary)" }}>
+                                            Main Findings / Results
+                                        </h4>
+                                        <p style={{ margin: 0, lineHeight: 1.6, color: "var(--text-primary)" }}>
+                                            {summaryData.findings}
+                                        </p>
+                                    </div>
+
+                                    {/* Limitations */}
+                                    <div style={{ background: "var(--bg-tertiary)", padding: "1rem", borderRadius: "var(--radius-md)" }}>
+                                        <h4 style={{ margin: "0 0 0.5rem 0", fontSize: "0.95rem", color: "var(--accent-primary)" }}>
+                                            Limitations / Future Work
+                                        </h4>
+                                        <p style={{ margin: 0, lineHeight: 1.6, color: "var(--text-primary)" }}>
+                                            {summaryData.limitations}
+                                        </p>
+                                    </div>
+
+                                    {/* Summary Sources */}
+                                    {summarySources.length > 0 && (
+                                        <div style={{ marginTop: "1rem", paddingTop: "1rem", borderTop: "1px solid var(--border-color)" }}>
+                                            <h4 style={{ margin: "0 0 0.75rem 0", fontSize: "0.95rem" }}>
+                                                Sources from the paper
+                                            </h4>
+                                            <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                                                {summarySources.map((source) => {
+                                                    const isSelected =
+                                                        selectedEvidence?.chunkId != null &&
+                                                        selectedEvidence.chunkId === source.chunk_id;
+                                                    return (
+                                                        <div
+                                                            key={source.chunk_id}
+                                                            style={{
+                                                                padding: "0.75rem",
+                                                                border: isSelected
+                                                                    ? "2px solid var(--accent-primary)"
+                                                                    : "1px solid var(--border-color)",
+                                                                borderRadius: "var(--radius-md)",
+                                                                background: isSelected
+                                                                    ? "var(--bg-tertiary)"
+                                                                    : "var(--bg-secondary)",
+                                                                transition: "border-color 0.2s",
+                                                            }}
+                                                        >
+                                                            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.35rem", flexWrap: "wrap" }}>
+                                                                <strong>Source {source.source_number}</strong>
+                                                                {source.page_number != null ? (
+                                                                    <>
+                                                                        <span style={{ color: "var(--text-muted)", userSelect: "none" }}>·</span>
+                                                                        <button
+                                                                            title={`Jump to page ${source.page_number} in the PDF viewer`}
+                                                                            onClick={() => handleEvidenceClick(source)}
+                                                                            style={{
+                                                                                background: "none",
+                                                                                border: "none",
+                                                                                padding: 0,
+                                                                                cursor: "pointer",
+                                                                                color: "var(--accent-primary)",
+                                                                                fontWeight: 600,
+                                                                                fontSize: "inherit",
+                                                                                fontFamily: "inherit",
+                                                                                textDecoration: "underline",
+                                                                                textUnderlineOffset: "2px",
+                                                                            }}
+                                                                        >
+                                                                            Page {source.page_number}
+                                                                        </button>
+                                                                    </>
+                                                                ) : (
+                                                                    <span
+                                                                        style={{
+                                                                            color: "var(--text-muted)",
+                                                                            fontSize: "0.85em",
+                                                                        }}
+                                                                    >
+                                                                        · Page information unavailable
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            <p style={{ margin: 0, fontSize: "0.875rem", lineHeight: 1.5, color: "var(--text-secondary)" }}>
+                                                                {source.text}
+                                                            </p>
+                                                            {source.page_number != null && (
+                                                                <div style={{ marginTop: "0.5rem" }}>
+                                                                    <button
+                                                                        onClick={() => handleEvidenceClick(source)}
+                                                                        title={`Open evidence from page ${source.page_number}`}
+                                                                        style={{
+                                                                            background: "none",
+                                                                            border: "1px solid var(--border-color)",
+                                                                            borderRadius: "var(--radius-sm)",
+                                                                            color: "var(--accent-primary)",
+                                                                            cursor: "pointer",
+                                                                            fontSize: "0.8rem",
+                                                                            padding: "0.2rem 0.6rem",
+                                                                            fontWeight: 600,
+                                                                        }}
+                                                                    >
+                                                                        Open Evidence
+                                                                    </button>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
                                             </div>
                                         </div>
                                     )}

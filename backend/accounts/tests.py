@@ -358,3 +358,169 @@ class NForgeAuthenticationSecurityTests(TestCase):
         admin_user_str = str(res_admin_user.data)
         self.assertNotIn("password", admin_user_str.lower())
         self.assertNotIn("pbkdf2", admin_user_str)
+
+
+class FriendshipSystemTests(TestCase):
+    """
+    Tests for NForge Friendship & Contact System.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+
+        self.user_a = User.objects.create_user(
+            username="alice_researcher",
+            email="alice@example.com",
+            password="Password123!",
+        )
+        self.token_a = Token.objects.create(user=self.user_a)
+
+        self.user_b = User.objects.create_user(
+            username="bob_collaborator",
+            email="bob@example.com",
+            password="Password123!",
+        )
+        self.token_b = Token.objects.create(user=self.user_b)
+
+        self.user_c = User.objects.create_user(
+            username="charlie_third",
+            email="charlie@example.com",
+            password="Password123!",
+        )
+        self.token_c = Token.objects.create(user=self.user_c)
+
+    def test_list_friends_initially_empty(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token_a.key}")
+        res = self.client.get("/api/friends/")
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["friends"], [])
+        self.assertEqual(res.data["incoming"], [])
+        self.assertEqual(res.data["outgoing"], [])
+
+    def test_send_friend_request_success(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token_a.key}")
+        res = self.client.post(
+            "/api/friends/request/",
+            {"username": "bob_collaborator"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(res.data["status"], "PENDING")
+
+        # Verify outgoing for A
+        res_a = self.client.get("/api/friends/")
+        self.assertEqual(len(res_a.data["outgoing"]), 1)
+        self.assertEqual(res_a.data["outgoing"][0]["to_user"]["username"], "bob_collaborator")
+
+        # Verify incoming for B
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token_b.key}")
+        res_b = self.client.get("/api/friends/")
+        self.assertEqual(len(res_b.data["incoming"]), 1)
+        self.assertEqual(res_b.data["incoming"][0]["from_user"]["username"], "alice_researcher")
+
+    def test_cannot_friend_self(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token_a.key}")
+        res = self.client.post(
+            "/api/friends/request/",
+            {"username": "alice_researcher"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_cannot_send_duplicate_friend_request(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token_a.key}")
+        res1 = self.client.post(
+            "/api/friends/request/",
+            {"username": "bob_collaborator"},
+            format="json",
+        )
+        self.assertEqual(res1.status_code, status.HTTP_201_CREATED)
+
+        res2 = self.client.post(
+            "/api/friends/request/",
+            {"username": "bob_collaborator"},
+            format="json",
+        )
+        self.assertEqual(res2.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_accept_friend_request_success(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token_a.key}")
+        res_req = self.client.post(
+            "/api/friends/request/",
+            {"username": "bob_collaborator"},
+            format="json",
+        )
+        friendship_id = res_req.data["id"]
+
+        # User B accepts
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token_b.key}")
+        res_accept = self.client.post(f"/api/friends/{friendship_id}/accept/")
+        self.assertEqual(res_accept.status_code, status.HTTP_200_OK)
+
+        # Both now have each other in friends list
+        res_b_list = self.client.get("/api/friends/")
+        self.assertEqual(len(res_b_list.data["friends"]), 1)
+        self.assertEqual(res_b_list.data["friends"][0]["user"]["username"], "alice_researcher")
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token_a.key}")
+        res_a_list = self.client.get("/api/friends/")
+        self.assertEqual(len(res_a_list.data["friends"]), 1)
+        self.assertEqual(res_a_list.data["friends"][0]["user"]["username"], "bob_collaborator")
+
+    def test_non_recipient_cannot_accept_request(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token_a.key}")
+        res_req = self.client.post(
+            "/api/friends/request/",
+            {"username": "bob_collaborator"},
+            format="json",
+        )
+        friendship_id = res_req.data["id"]
+
+        # User C attempts to accept request intended for User B
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token_c.key}")
+        res_accept = self.client.post(f"/api/friends/{friendship_id}/accept/")
+        self.assertEqual(res_accept.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_decline_friend_request(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token_a.key}")
+        res_req = self.client.post(
+            "/api/friends/request/",
+            {"username": "bob_collaborator"},
+            format="json",
+        )
+        friendship_id = res_req.data["id"]
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token_b.key}")
+        res_decline = self.client.post(f"/api/friends/{friendship_id}/decline/")
+        self.assertEqual(res_decline.status_code, status.HTTP_200_OK)
+
+        res_b_list = self.client.get("/api/friends/")
+        self.assertEqual(len(res_b_list.data["incoming"]), 0)
+        self.assertEqual(len(res_b_list.data["friends"]), 0)
+
+    def test_remove_friend(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token_a.key}")
+        res_req = self.client.post(
+            "/api/friends/request/",
+            {"username": "bob_collaborator"},
+            format="json",
+        )
+        friendship_id = res_req.data["id"]
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token_b.key}")
+        self.client.post(f"/api/friends/{friendship_id}/accept/")
+
+        # User B removes friend
+        res_del = self.client.delete(f"/api/friends/{friendship_id}/")
+        self.assertEqual(res_del.status_code, status.HTTP_200_OK)
+
+        res_b_list = self.client.get("/api/friends/")
+        self.assertEqual(len(res_b_list.data["friends"]), 0)
+
+    def test_search_users(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token_a.key}")
+        res = self.client.get("/api/friends/search/?q=bob")
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(res.data), 1)
+        self.assertEqual(res.data[0]["username"], "bob_collaborator")
+        self.assertNotIn("password", res.data[0])
