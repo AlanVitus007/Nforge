@@ -6,9 +6,12 @@
   padding: 0 1rem 0.5rem;
   box-sizing: border-box;
   height: 100%;
+  max-height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-height: 0;
+  flex: 1;
 }
 
 .workspace-top-bar {
@@ -88,6 +91,7 @@
   flex: 1;
   min-height: 0;
   height: 100%;
+  max-height: 100%;
   overflow: hidden;
 }
 
@@ -371,6 +375,7 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  max-height: 100%;
   min-height: 0;
   box-shadow: var(--shadow-sm);
   overflow: hidden;
@@ -511,6 +516,7 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   scrollbar-width: thin;
   scrollbar-color: var(--border-color) transparent;
 }
@@ -620,6 +626,12 @@
   border-bottom-right-radius: 0.2rem;
 }
 
+.message-card.user .message-text,
+.message-card.user p,
+.message-card.user span {
+  color: #ffffff !important;
+}
+
 .message-card.assistant {
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
@@ -627,10 +639,16 @@
   border-bottom-left-radius: 0.2rem;
 }
 
+.message-card.assistant .message-text,
+.message-card.assistant p {
+  color: var(--text-primary);
+}
+
 .message-text {
   margin: 0;
   white-space: pre-wrap;
   font-size: 0.95rem;
+  line-height: 1.6;
 }
 
 .message-evidence-container {

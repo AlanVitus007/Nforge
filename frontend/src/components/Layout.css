@@ -408,14 +408,27 @@
   width: 100%;
 }
 
+.layout.workspace-layout {
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
+}
+
 .main-content.workspace-main-content {
   padding-top: 0.5rem;
   padding-bottom: 0;
+  padding-left: 0;
+  padding-right: 0;
   width: 100%;
   max-width: 100%;
   height: calc(100vh - 4rem);
+  max-height: calc(100vh - 4rem);
   overflow: hidden;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
 }
 
 .footer {

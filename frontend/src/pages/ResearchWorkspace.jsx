@@ -621,15 +621,17 @@ function ResearchWorkspace() {
                 const scrollToEnd = () => {
                     if (chatScrollRef.current) {
                         chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
-                    } else if (messagesEndRef.current) {
-                        messagesEndRef.current.scrollIntoView({ behavior: 'auto' });
                     }
                 };
 
-                // Run immediately in next animation frame and follow up on post-paint tick
+                // Run immediately in next animation frame and follow up on post-paint ticks
                 requestAnimationFrame(scrollToEnd);
-                const timer = setTimeout(scrollToEnd, 60);
-                return () => clearTimeout(timer);
+                const timer1 = setTimeout(scrollToEnd, 60);
+                const timer2 = setTimeout(scrollToEnd, 180);
+                return () => {
+                    clearTimeout(timer1);
+                    clearTimeout(timer2);
+                };
             }
         }
     }, [activeSessionKey, loadingSession, sessionMessagesCount]);
@@ -660,6 +662,7 @@ function ResearchWorkspace() {
         try {
             setActiveSessionId(sessionId);
             setActiveSession(null); // Clear previous session messages immediately so Session A does not linger
+            lastScrolledSessionIdRef.current = null;
             setLoadingSession(true);
             setSessionError('');
             setAskError('');

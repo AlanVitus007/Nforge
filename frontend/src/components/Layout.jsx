@@ -68,8 +68,10 @@ const Layout = ({ children }) => {
     return username.slice(0, 2).toUpperCase();
   };
 
+  const isWorkspace = location.pathname.includes('/research');
+
   return (
-    <div className="layout">
+    <div className={`layout ${isWorkspace ? 'workspace-layout' : ''}`}>
       <header className="header glass-panel">
         <div className="container header-container">
           <div className="logo-section">
@@ -227,11 +229,11 @@ const Layout = ({ children }) => {
         </div>
       </header>
       
-      <main className={`main-content animate-fade-in ${location.pathname.startsWith('/research') ? 'workspace-main-content' : 'container'}`}>
+      <main className={`main-content ${isWorkspace ? 'workspace-main-content' : 'animate-fade-in container'}`}>
         {children}
       </main>
       
-      {!location.pathname.startsWith('/research') && (
+      {!isWorkspace && (
         <footer className="footer">
           <div className="container">
             <p>&copy; {new Date().getFullYear()} NForge. All rights reserved.</p>
