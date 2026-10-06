@@ -4,7 +4,8 @@ from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.authtoken.models import Token
 from django.contrib.auth import authenticate
-from .serializers import UserSerializer, RegisterSerializer
+from django.db.models import Q
+from .serializers import UserSerializer, UserProfileSerializer, RegisterSerializer
 
 class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
@@ -56,3 +57,29 @@ class TestProtectedView(APIView):
 
     def get(self, request):
         return Response({"message": f"Hello, {request.user.username}! You are authenticated."})
+
+class UserProfileView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        serializer = UserProfileSerializer(user)
+        data = dict(serializer.data)
+
+        # Calculate project counts and friends counts cleanly
+        from projects.models import Project, ProjectMember
+        from .models import Friendship
+
+        owned_count = Project.objects.filter(owner=user).count()
+        member_count = ProjectMember.objects.filter(user=user).exclude(project__owner=user).count()
+        total_projects = owned_count + member_count
+
+        friends_count = Friendship.objects.filter(
+            Q(user=user, status='ACCEPTED') | Q(friend=user, status='ACCEPTED')
+        ).count()
+
+        data["projects_count"] = total_projects
+        data["friends_count"] = friends_count
+
+        return Response(data)
+

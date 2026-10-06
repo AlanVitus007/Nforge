@@ -8,6 +8,12 @@ class UserSerializer(serializers.ModelSerializer):
         fields = ('id', 'username', 'email', 'is_staff', 'is_superuser')
         read_only_fields = ('is_staff', 'is_superuser')
 
+class UserProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ('id', 'username', 'email', 'first_name', 'last_name', 'date_joined', 'is_active', 'is_staff', 'is_superuser')
+        read_only_fields = ('id', 'date_joined', 'is_active', 'is_staff', 'is_superuser')
+
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
 

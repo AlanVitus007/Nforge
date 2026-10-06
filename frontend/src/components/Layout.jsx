@@ -58,17 +58,6 @@ const Layout = ({ children }) => {
     navigate(path);
   };
 
-  const handleInvitationsClick = () => {
-    setMenuOpen(false);
-    navigate('/dashboard');
-    setTimeout(() => {
-      const invElement = document.getElementById('project-invitations-section');
-      if (invElement) {
-        invElement.scrollIntoView({ behavior: 'smooth' });
-      }
-    }, 100);
-  };
-
   const handleSettingsClick = () => {
     setMenuOpen(false);
     setSettingsOpen(true);
@@ -156,7 +145,7 @@ const Layout = ({ children }) => {
                       type="button"
                       role="menuitem"
                       className="dropdown-item"
-                      onClick={() => handleNavClick('/dashboard')}
+                      onClick={() => handleNavClick('/profile')}
                     >
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
@@ -178,19 +167,6 @@ const Layout = ({ children }) => {
                         <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
                       </svg>
                       Friends
-                    </button>
-
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="dropdown-item"
-                      onClick={handleInvitationsClick}
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
-                        <polyline points="22,6 12,13 2,6"></polyline>
-                      </svg>
-                      Invitations
                     </button>
 
                     <button

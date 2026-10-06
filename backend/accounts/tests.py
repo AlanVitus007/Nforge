@@ -524,3 +524,36 @@ class FriendshipSystemTests(TestCase):
         self.assertEqual(len(res.data), 1)
         self.assertEqual(res.data[0]["username"], "bob_collaborator")
         self.assertNotIn("password", res.data[0])
+
+
+class UserProfileEndpointTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            username="profile_researcher",
+            email="researcher@example.com",
+            password="StrongPassword123!",
+            first_name="Jane",
+            last_name="Doe",
+        )
+        self.token = Token.objects.create(user=self.user)
+
+    def test_unauthenticated_profile_access_rejected(self):
+        res = self.client.get("/api/auth/profile/")
+        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_authenticated_profile_returns_safe_data(self):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token.key}")
+        res = self.client.get("/api/auth/profile/")
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["username"], "profile_researcher")
+        self.assertEqual(res.data["email"], "researcher@example.com")
+        self.assertEqual(res.data["first_name"], "Jane")
+        self.assertEqual(res.data["last_name"], "Doe")
+        self.assertTrue(res.data["is_active"])
+        self.assertIn("date_joined", res.data)
+        self.assertIn("projects_count", res.data)
+        self.assertIn("friends_count", res.data)
+        self.assertNotIn("password", res.data)
+        self.assertNotIn("token", res.data)
+

@@ -92,54 +92,81 @@ function ProjectDetails() {
         try {
             const response = await api.get(`/projects/${id}/`);
             setProject(response.data);
+            return response.data;
         } catch (err) {
-            setError("Failed to load project.");
+            console.error("Failed to load project:", err);
+            if (err.response?.status === 403) {
+                setError("You don't have permission to view this project.");
+            } else if (err.response?.status === 404) {
+                setError("Project not found.");
+            } else {
+                setError("Unable to load project. Please try again.");
+            }
+            return null;
         }
     };
 
     const fetchPapers = async () => {
         try {
             const response = await api.get(`/projects/${id}/papers/`);
-            setPapers(response.data);
+            setPapers(response.data || []);
         } catch (err) {
-            setError("Failed to load papers.");
+            console.error("Failed to load papers:", err);
         }
     };
 
     const fetchMembers = async () => {
         try {
-            setLoadingMembers(true);
             setMemberError("");
             const data = await getProjectMembers(id);
             setMembers(Array.isArray(data) ? data : []);
         } catch (err) {
-            // If viewer or member, backend allows GET members. If error, log safely
-            console.error("Failed to load members", err);
-        } finally {
-            setLoadingMembers(false);
+            console.error("Failed to load members:", err);
         }
     };
 
     useEffect(() => {
+        let isMounted = true;
+
         const loadData = async () => {
+            if (!id) return;
             setLoading(true);
             setError("");
 
-            await fetchProject();
-            await fetchPapers();
-            await fetchMembers();
-
             try {
-                const friendsData = await getFriends();
-                setFriendsList(friendsData.friends || []);
-            } catch {
-                // Ignore if friends could not be fetched
-            }
+                // 1. Fetch project first
+                const projectData = await fetchProject();
+                if (!projectData || !isMounted) {
+                    return;
+                }
 
-            setLoading(false);
+                // 2. Concurrently fetch papers, members, and friends
+                await Promise.allSettled([
+                    fetchPapers(),
+                    fetchMembers(),
+                    getFriends().then((friendsData) => {
+                        if (isMounted) {
+                            setFriendsList(friendsData.friends || []);
+                        }
+                    }).catch(() => {})
+                ]);
+            } catch (err) {
+                if (isMounted) {
+                    console.error("Unexpected error in loadData:", err);
+                    setError("Unable to load project. Please try again.");
+                }
+            } finally {
+                if (isMounted) {
+                    setLoading(false);
+                }
+            }
         };
 
         loadData();
+
+        return () => {
+            isMounted = false;
+        };
     }, [id]);
 
     const handleInvite = async (e) => {
@@ -335,16 +362,64 @@ function ProjectDetails() {
 
     if (loading) {
         return (
-            <div style={{ textAlign: "center", padding: "3rem" }}>
-                Loading project...
+            <div style={{ textAlign: "center", padding: "4rem 1.5rem", color: "var(--text-secondary)" }}>
+                <div className="spinner-icon" style={{ margin: "0 auto 1rem auto" }}></div>
+                <p style={{ margin: 0, fontSize: "1rem", fontWeight: 500 }}>Loading project...</p>
             </div>
         );
     }
 
     if (error && !project) {
         return (
-            <div style={{ color: "var(--danger)", padding: "2rem" }}>
-                {error}
+            <div style={{ width: "100%", maxWidth: "800px", margin: "2.5rem auto", padding: "0 1.5rem", boxSizing: "border-box" }}>
+                <Link
+                    to="/projects"
+                    style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "0.5rem",
+                        marginBottom: "1.5rem",
+                        color: "var(--text-secondary)",
+                        textDecoration: "none",
+                        fontWeight: 500
+                    }}
+                >
+                    ← Back to Projects
+                </Link>
+                <div style={{
+                    padding: "2.5rem 2rem",
+                    background: "var(--bg-secondary)",
+                    border: "1px solid var(--border-color)",
+                    borderRadius: "var(--radius-xl)",
+                    textAlign: "center"
+                }}>
+                    <div style={{
+                        width: "3rem",
+                        height: "3rem",
+                        borderRadius: "50%",
+                        background: "rgba(239, 68, 68, 0.1)",
+                        color: "var(--danger)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        margin: "0 auto 1.25rem auto"
+                    }}>
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="12" y1="8" x2="12" y2="12"></line>
+                            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                        </svg>
+                    </div>
+                    <h2 style={{ fontSize: "1.25rem", margin: "0 0 0.5rem 0", color: "var(--text-primary)" }}>
+                        {error === "Project not found." ? "Project Not Found" : error === "You don't have permission to view this project." ? "Access Denied" : "Unable to Load Project"}
+                    </h2>
+                    <p style={{ color: "var(--text-secondary)", margin: "0 0 1.5rem 0", fontSize: "0.95rem" }}>
+                        {error}
+                    </p>
+                    <Button onClick={() => navigate("/projects")}>
+                        Return to Projects
+                    </Button>
+                </div>
             </div>
         );
     }

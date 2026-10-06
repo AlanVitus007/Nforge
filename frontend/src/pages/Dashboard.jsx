@@ -3,7 +3,6 @@ import { AuthContext } from '../context/AuthContext';
 import { useNavigate, Link } from 'react-router-dom';
 import api from '../services/api';
 import Button from '../components/Button';
-import ProjectInvitations from '../components/ProjectInvitations';
 import { getProjectMembers } from '../services/collaboration';
 import './Dashboard.css';
 
@@ -140,11 +139,6 @@ const Dashboard = () => {
                     {error}
                 </div>
             )}
-
-            {/* Pending Invitations Banner */}
-            <div id="project-invitations-section">
-                <ProjectInvitations onAccepted={fetchDashboardData} />
-            </div>
 
             {/* Metrics Overview Strip */}
             <section className="dashboard-stats-grid">
