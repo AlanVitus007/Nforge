@@ -565,8 +565,13 @@ function ResearchWorkspace() {
     const [renameTitle, setRenameTitle] = useState('');
     const [deletingSession, setDeletingSession] = useState(null);
 
+    const chatScrollRef = useRef(null);
     const messagesEndRef = useRef(null);
     const currentSelectIdRef = useRef(null);
+    const [isNearBottom, setIsNearBottom] = useState(true);
+    const isNearBottomRef = useRef(true);
+    const lastScrolledSessionIdRef = useRef(null);
+    const prevMessageCountRef = useRef(0);
 
     // Redirect if unauthenticated
     useEffect(() => {
@@ -575,11 +580,78 @@ function ResearchWorkspace() {
         }
     }, [user, authLoading, navigate]);
 
-    const scrollToBottom = () => {
+    const scrollToBottom = useCallback((smooth = true) => {
         requestAnimationFrame(() => {
-            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+            if (chatScrollRef.current) {
+                if (smooth) {
+                    chatScrollRef.current.scrollTo({
+                        top: chatScrollRef.current.scrollHeight,
+                        behavior: 'smooth'
+                    });
+                } else {
+                    chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+                }
+            } else if (messagesEndRef.current) {
+                messagesEndRef.current.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
+            }
         });
-    };
+    }, []);
+
+    const handleConversationScroll = useCallback(() => {
+        if (!chatScrollRef.current) return;
+        const { scrollTop, scrollHeight, clientHeight } = chatScrollRef.current;
+        const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
+        const nearBottom = distanceFromBottom <= 100;
+        setIsNearBottom(nearBottom);
+        isNearBottomRef.current = nearBottom;
+    }, []);
+
+    const activeSessionKey = activeSession?.id;
+    const sessionMessagesCount = activeSession?.messages?.length || 0;
+
+    // Initial session load & session switching: instantly position at latest message
+    useEffect(() => {
+        if (!loadingSession && activeSessionKey) {
+            if (lastScrolledSessionIdRef.current !== activeSessionKey) {
+                lastScrolledSessionIdRef.current = activeSessionKey;
+                prevMessageCountRef.current = sessionMessagesCount;
+                setIsNearBottom(true);
+                isNearBottomRef.current = true;
+
+                const scrollToEnd = () => {
+                    if (chatScrollRef.current) {
+                        chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+                    } else if (messagesEndRef.current) {
+                        messagesEndRef.current.scrollIntoView({ behavior: 'auto' });
+                    }
+                };
+
+                // Run immediately in next animation frame and follow up on post-paint tick
+                requestAnimationFrame(scrollToEnd);
+                const timer = setTimeout(scrollToEnd, 60);
+                return () => clearTimeout(timer);
+            }
+        }
+    }, [activeSessionKey, loadingSession, sessionMessagesCount]);
+
+    // When new messages are appended to active session, smoothly scroll down
+    useEffect(() => {
+        if (!activeSessionKey || loadingSession) return;
+        if (lastScrolledSessionIdRef.current === activeSessionKey && sessionMessagesCount > prevMessageCountRef.current) {
+            if (isNearBottomRef.current) {
+                scrollToBottom(true);
+            }
+        }
+        prevMessageCountRef.current = sessionMessagesCount;
+    }, [activeSessionKey, loadingSession, sessionMessagesCount, scrollToBottom]);
+
+    // Ensure analyzing banner is visible when user sends a question
+    useEffect(() => {
+        const isAnalyzing = loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend;
+        if (isAnalyzing && chatScrollRef.current) {
+            scrollToBottom(true);
+        }
+    }, [loadingAsk, loadingCompare, loadingGap, loadingThematic, loadingTrend, scrollToBottom]);
 
     // Select and open an existing session (0 Gemini calls) with race condition protection
     const handleSelectSession = useCallback(async (sessionId) => {
@@ -2753,7 +2825,11 @@ function ResearchWorkspace() {
                             </div>
 
                             {/* Conversation Scrollable Thread */}
-                            <div className="conversation-scroll-area">
+                            <div
+                                className="conversation-scroll-area"
+                                ref={chatScrollRef}
+                                onScroll={handleConversationScroll}
+                            >
                                 {activeSession.messages && activeSession.messages.length > 0 ? (
                                     activeSession.messages.map(renderMessage)
                                 ) : (
@@ -2766,7 +2842,7 @@ function ResearchWorkspace() {
                                         </div>
                                         <h3 className="empty-session-title">Start your research</h3>
                                         <p className="empty-session-desc">
-                                            Ask a question about one of your papers, or compare multiple papers.
+                                             Ask a question about one of your papers, or compare multiple papers.
                                         </p>
                                         <div className="empty-session-hint">
                                             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -2820,6 +2896,22 @@ function ResearchWorkspace() {
 
                                 <div ref={messagesEndRef} />
                             </div>
+
+                            {/* Floating Scroll to Latest Pill */}
+                            {!isNearBottom && (activeSession.messages?.length || 0) > 0 && (
+                                <button
+                                    type="button"
+                                    className="scroll-to-bottom-pill"
+                                    onClick={() => scrollToBottom(true)}
+                                    aria-label="Scroll to latest message"
+                                >
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                                        <polyline points="19 12 12 19 5 12"></polyline>
+                                    </svg>
+                                    <span>Latest</span>
+                                </button>
+                            )}
 
                             {/* Chat Footer: Action Mode Tabs & Inputs */}
                             <div className="workspace-chat-footer">

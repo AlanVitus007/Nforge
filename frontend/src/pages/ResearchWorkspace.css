@@ -200,6 +200,25 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-color) transparent;
+}
+
+.sessions-scroll-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.sessions-scroll-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sessions-scroll-list::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: var(--radius-full);
+}
+
+.sessions-scroll-list::-webkit-scrollbar-thumb:hover {
+  background: var(--border-hover);
 }
 
 .session-card {
@@ -345,6 +364,7 @@
 
 /* ── Main Conversation Area ── */
 .workspace-main {
+  position: relative;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-xl);
@@ -489,7 +509,60 @@
   flex-direction: column;
   gap: 1.5rem;
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-color) transparent;
+}
+
+.conversation-scroll-area::-webkit-scrollbar {
+  width: 7px;
+}
+
+.conversation-scroll-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.conversation-scroll-area::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: var(--radius-full);
+}
+
+.conversation-scroll-area::-webkit-scrollbar-thumb:hover {
+  background: var(--border-hover);
+}
+
+/* Floating Scroll to Latest Pill */
+.scroll-to-bottom-pill {
+  position: absolute;
+  bottom: 7.5rem;
+  right: 2rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.85rem;
+  border-radius: var(--radius-full);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-md);
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  z-index: 30;
+  transition: all var(--transition-fast);
+}
+
+.scroll-to-bottom-pill:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+
+.scroll-to-bottom-pill svg {
+  color: var(--accent-primary);
 }
 
 .message-row {
@@ -896,6 +969,7 @@
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  flex-shrink: 0;
 }
 
 .chat-selector-row {
@@ -1770,6 +1844,10 @@
   }
   .paper-tag-pill {
     max-width: 100%;
+  }
+  .scroll-to-bottom-pill {
+    right: 1rem;
+    bottom: 6.5rem;
   }
 }
 
