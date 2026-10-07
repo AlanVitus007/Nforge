@@ -30,11 +30,15 @@ SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-fallback-key-do-not-u
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'False').lower() in ('true', '1', 't')
 
-ALLOWED_HOSTS = [
-    "localhost",
-    "127.0.0.1",
-    "10.115.130.190",
-]
+# Allowed hosts configured via environment variable (comma-separated), with sensible localhost defaults
+raw_allowed_hosts = os.environ.get('ALLOWED_HOSTS', '')
+if raw_allowed_hosts:
+    ALLOWED_HOSTS = list(dict.fromkeys(
+        [h.strip() for h in raw_allowed_hosts.split(',') if h.strip()] + ["localhost", "127.0.0.1"]
+    ))
+else:
+    ALLOWED_HOSTS = ["localhost", "127.0.0.1", "0.0.0.0"]
+
 
 # Application definition
 
@@ -151,9 +155,25 @@ STATIC_URL = 'static/'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-CORS_ALLOWED_ORIGINS = [
+# CORS configuration driven by environment variables (comma-separated origins)
+# Secure defaults: no wildcard, no all-origins allowed.
+default_cors_origins = [
     "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
 ]
+cors_env = os.environ.get('CORS_ALLOWED_ORIGINS', '')
+if cors_env:
+    parsed_origins = [
+        origin.strip().rstrip('/')
+        for origin in cors_env.split(',')
+        if origin.strip()
+    ]
+    CORS_ALLOWED_ORIGINS = list(dict.fromkeys(default_cors_origins + parsed_origins))
+else:
+    CORS_ALLOWED_ORIGINS = default_cors_origins
+
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field

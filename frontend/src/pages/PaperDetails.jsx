@@ -118,7 +118,7 @@ function PaperDetails() {
 
                 // Build the base PDF URL (strip any server origin for same-host serving)
                 if (data.file) {
-                    const base = data.file.replace("http://localhost:8000", "");
+                    const base = data.file.replace(/^https?:\/\/[^/]+/, "");
                     pdfBaseUrl.current = base;
                     if (pageParam) {
                         setIframeSrc(`${base}#page=${pageParam}`);
