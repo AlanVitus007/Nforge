@@ -18,9 +18,9 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.4rem;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: 0.5rem;
   flex-shrink: 0;
 }
 
@@ -382,14 +382,14 @@
 }
 
 .workspace-active-header {
-  padding: 1rem 1.5rem;
+  padding: 0.75rem 1.25rem;
   background: var(--bg-primary);
   border-bottom: 1px solid var(--border-color);
   display: flex;
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: 0.5rem;
   flex-shrink: 0;
 }
 
@@ -509,10 +509,10 @@
 
 /* ── Conversation Messages Flow ── */
 .conversation-scroll-area {
-  padding: 1.75rem;
+  padding: 1.25rem 1.5rem;
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 1.25rem;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -652,9 +652,14 @@
 }
 
 .message-evidence-container {
-  margin-top: 1rem;
-  padding-top: 0.85rem;
+  margin-top: 0.75rem;
+  padding-top: 0.65rem;
   border-top: 1px dashed var(--border-color);
+  max-height: 200px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-color) transparent;
+  padding-right: 0.35rem;
 }
 
 .evidence-header-label {
@@ -841,13 +846,17 @@
 
 /* ── Research Papers Bar ── */
 .workspace-papers-bar {
-  padding: 0.5rem 1.5rem;
+  padding: 0.4rem 1.25rem;
   background: var(--bg-tertiary);
   border-bottom: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0.35rem;
   flex-shrink: 0;
+  max-height: 140px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-color) transparent;
 }
 
 .papers-bar-left {
@@ -903,8 +912,12 @@
 .papers-tags-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 0.35rem;
   align-items: center;
+  max-height: 80px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-color) transparent;
 }
 
 .paper-tag-pill {
@@ -981,12 +994,12 @@
 
 /* ── Chat Footer & Input ── */
 .workspace-chat-footer {
-  padding: 1.25rem 1.75rem;
+  padding: 0.85rem 1.25rem;
   background: var(--bg-primary);
   border-top: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.5rem;
   flex-shrink: 0;
 }
 
@@ -1031,8 +1044,8 @@
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
-  padding: 0.75rem 1rem;
-  font-size: 0.9rem;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.875rem;
   color: var(--text-primary);
   resize: none;
   outline: none;
@@ -1055,15 +1068,15 @@
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.75rem 1.4rem;
+  padding: 0.65rem 1.25rem;
   background: var(--accent-primary);
   color: #ffffff;
   border: none;
   border-radius: var(--radius-lg);
-  font-size: 0.875rem;
+  font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
-  height: 44px;
+  height: 42px;
   box-sizing: border-box;
   transition: all var(--transition-fast);
   white-space: nowrap;
@@ -1211,19 +1224,19 @@
   display: flex;
   gap: 0.5rem;
   border-bottom: 1px solid var(--border-color);
-  padding-bottom: 0.75rem;
-  margin-bottom: 0.25rem;
+  padding-bottom: 0.45rem;
+  margin-bottom: 0.15rem;
 }
 
 .chat-mode-tab {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  padding: 0.45rem 0.85rem;
+  padding: 0.35rem 0.75rem;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  font-size: 0.825rem;
+  font-size: 0.8rem;
   font-weight: 600;
   color: var(--text-secondary);
   cursor: pointer;
@@ -1845,20 +1858,21 @@
     padding: 0 0.5rem 0.5rem;
   }
   .workspace-active-header {
-    padding: 1rem;
+    padding: 0.65rem 0.85rem;
   }
   .active-title-rename-input {
     max-width: 100%;
     min-width: 160px;
   }
   .workspace-papers-bar {
-    padding: 0.75rem 1rem;
+    padding: 0.35rem 0.85rem;
+    max-height: 110px;
   }
   .conversation-scroll-area {
-    padding: 1rem;
+    padding: 0.85rem;
   }
   .workspace-chat-footer {
-    padding: 1rem;
+    padding: 0.75rem 0.85rem;
   }
   .paper-tag-pill {
     max-width: 100%;

@@ -23,18 +23,18 @@ function EvidenceSource({ source, projectId }) {
             background: "var(--bg-tertiary)",
             border: "1px solid var(--border-color)",
             borderRadius: "var(--radius-md)",
-            padding: "0.875rem 1rem",
-            marginTop: "0.75rem",
+            padding: "0.55rem 0.85rem",
+            marginTop: "0.5rem",
         }}>
             <div style={{
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
-                gap: "1rem",
-                marginBottom: "0.5rem",
+                gap: "0.75rem",
+                marginBottom: "0.35rem",
                 flexWrap: "wrap",
             }}>
-                <span style={{ fontWeight: 600, fontSize: "0.875rem", color: "var(--text-primary)" }}>
+                <span style={{ fontWeight: 600, fontSize: "0.825rem", color: "var(--text-primary)" }}>
                     {paperTitle}{pageNum ? ` · ${pageNum}` : ""}
                 </span>
                 <button
@@ -45,8 +45,8 @@ function EvidenceSource({ source, projectId }) {
                         color: "#ffffff",
                         border: "none",
                         borderRadius: "var(--radius-sm)",
-                        padding: "0.35rem 0.85rem",
-                        fontSize: "0.8rem",
+                        padding: "0.25rem 0.65rem",
+                        fontSize: "0.75rem",
                         fontWeight: 600,
                         cursor: "pointer",
                         transition: "background 0.2s",
@@ -58,13 +58,15 @@ function EvidenceSource({ source, projectId }) {
             {source.text && (
                 <p style={{
                     margin: 0,
-                    fontSize: "0.85rem",
+                    fontSize: "0.825rem",
                     color: "var(--text-secondary)",
                     fontStyle: "italic",
                     lineHeight: "1.4",
                     borderLeft: "3px solid var(--accent-primary)",
-                    paddingLeft: "0.75rem",
+                    paddingLeft: "0.65rem",
                     whiteSpace: "pre-wrap",
+                    maxHeight: "85px",
+                    overflowY: "auto",
                 }}>
                     "{source.text}"
                 </p>
