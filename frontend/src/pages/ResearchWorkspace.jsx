@@ -2669,108 +2669,110 @@ function ResearchWorkspace() {
                     ) : (
                         /* Active Conversation Thread View */
                         <>
-                            <div className="workspace-active-header">
-                                <div className="active-session-title-wrap">
-                                    {renamingSessionId === activeSession.id ? (
-                                        <form
-                                            className="active-title-rename-form"
-                                            onSubmit={(e) => handleSaveRename(activeSession.id, e)}
-                                        >
-                                            <input
-                                                type="text"
-                                                className="active-title-rename-input"
-                                                value={renameTitle}
-                                                onChange={(e) => {
-                                                    setRenameTitle(e.target.value);
-                                                    setRenameError('');
-                                                }}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Escape') cancelRename();
-                                                }}
-                                                autoFocus
-                                                disabled={isRenaming}
-                                                maxLength={100}
-                                                placeholder="Enter session title..."
-                                            />
-                                            <button
-                                                type="submit"
-                                                className="action-btn-primary"
-                                                disabled={isRenaming || !renameTitle.trim()}
+                            <div className="workspace-header-group">
+                                <div className="workspace-active-header">
+                                    <div className="active-session-title-wrap">
+                                        {renamingSessionId === activeSession.id ? (
+                                            <form
+                                                className="active-title-rename-form"
+                                                onSubmit={(e) => handleSaveRename(activeSession.id, e)}
                                             >
-                                                {isRenaming ? 'Saving...' : 'Save'}
-                                            </button>
-                                            <button
-                                                type="button"
-                                                className="action-btn-secondary"
-                                                onClick={cancelRename}
-                                                disabled={isRenaming}
-                                            >
-                                                Cancel
-                                            </button>
-                                            {renameError && <span className="rename-error-text">{renameError}</span>}
-                                        </form>
-                                    ) : (
-                                        <div>
-                                            <h2
-                                                className={`active-session-title ${!isViewer ? 'clickable' : ''}`}
-                                                onClick={!isViewer ? (e) => startRename(activeSession, e) : undefined}
-                                                title={!isViewer ? 'Click to rename session' : activeSession.title}
-                                            >
-                                                <span>{activeSession.title}</span>
-                                                {!isViewer && (
-                                                    <span className="title-edit-hint" aria-label="Edit title">
-                                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                            <path d="M12 20h9"></path>
-                                                            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
-                                                        </svg>
-                                                    </span>
-                                                )}
-                                            </h2>
-                                            <div className="active-session-meta">
-                                                <span>{formatSessionTime(activeSession.updated_at)}</span>
-                                                {activeSession.papers && activeSession.papers.length > 0 && (
-                                                    <span>
-                                                        {' '} &middot; {activeSession.papers.length} {activeSession.papers.length === 1 ? 'paper' : 'papers'} in session
-                                                    </span>
-                                                )}
+                                                <input
+                                                    type="text"
+                                                    className="active-title-rename-input"
+                                                    value={renameTitle}
+                                                    onChange={(e) => {
+                                                        setRenameTitle(e.target.value);
+                                                        setRenameError('');
+                                                    }}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Escape') cancelRename();
+                                                    }}
+                                                    autoFocus
+                                                    disabled={isRenaming}
+                                                    maxLength={100}
+                                                    placeholder="Enter session title..."
+                                                />
+                                                <button
+                                                    type="submit"
+                                                    className="action-btn-primary"
+                                                    disabled={isRenaming || !renameTitle.trim()}
+                                                >
+                                                    {isRenaming ? 'Saving...' : 'Save'}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="action-btn-secondary"
+                                                    onClick={cancelRename}
+                                                    disabled={isRenaming}
+                                                >
+                                                    Cancel
+                                                </button>
+                                                {renameError && <span className="rename-error-text">{renameError}</span>}
+                                            </form>
+                                        ) : (
+                                            <div>
+                                                <h2
+                                                    className={`active-session-title ${!isViewer ? 'clickable' : ''}`}
+                                                    onClick={!isViewer ? (e) => startRename(activeSession, e) : undefined}
+                                                    title={!isViewer ? 'Click to rename session' : activeSession.title}
+                                                >
+                                                    <span>{activeSession.title}</span>
+                                                    {!isViewer && (
+                                                        <span className="title-edit-hint" aria-label="Edit title">
+                                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                                <path d="M12 20h9"></path>
+                                                                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                                                            </svg>
+                                                        </span>
+                                                    )}
+                                                </h2>
+                                                <div className="active-session-meta">
+                                                    <span>{formatSessionTime(activeSession.updated_at)}</span>
+                                                    {activeSession.papers && activeSession.papers.length > 0 && (
+                                                        <span>
+                                                            {' '} &middot; {activeSession.papers.length} {activeSession.papers.length === 1 ? 'paper' : 'papers'} in session
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </div>
+                                        )}
+                                    </div>
+
+                                    {!isViewer && (
+                                        <div className="active-session-actions">
+                                            {renamingSessionId !== activeSession.id && (
+                                                <button
+                                                    className="action-btn-secondary"
+                                                    onClick={(e) => startRename(activeSession, e)}
+                                                    type="button"
+                                                >
+                                                    Rename
+                                                </button>
+                                            )}
+                                            <button
+                                                className="action-btn-danger"
+                                                onClick={(e) => openDeleteModal(activeSession, e)}
+                                                type="button"
+                                            >
+                                                Delete
+                                            </button>
                                         </div>
                                     )}
                                 </div>
 
-                                {!isViewer && (
-                                    <div className="active-session-actions">
-                                        {renamingSessionId !== activeSession.id && (
-                                            <button
-                                                className="action-btn-secondary"
-                                                onClick={(e) => startRename(activeSession, e)}
-                                                type="button"
-                                            >
-                                                Rename
-                                            </button>
-                                        )}
-                                        <button
-                                            className="action-btn-danger"
-                                            onClick={(e) => openDeleteModal(activeSession, e)}
-                                            type="button"
-                                        >
-                                            Delete
-                                        </button>
+                                {/* Read-Only Viewer Banner */}
+                                {isViewer && (
+                                    <div className="workspace-viewer-banner">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                            <circle cx="12" cy="12" r="10"></circle>
+                                            <line x1="12" y1="16" x2="12" y2="12"></line>
+                                            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                                        </svg>
+                                        <span>Read-only access &mdash; you can view this research but cannot create or modify analyses.</span>
                                     </div>
                                 )}
                             </div>
-
-                            {/* Read-Only Viewer Banner */}
-                            {isViewer && (
-                                <div className="workspace-viewer-banner">
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                        <circle cx="12" cy="12" r="10"></circle>
-                                        <line x1="12" y1="16" x2="12" y2="12"></line>
-                                        <line x1="12" y1="8" x2="12.01" y2="8"></line>
-                                    </svg>
-                                    <span>Read-only access &mdash; you can view this research but cannot create or modify analyses.</span>
-                                </div>
-                            )}
 
                             {/* Research Papers Section */}
                             <div className="workspace-papers-bar">
