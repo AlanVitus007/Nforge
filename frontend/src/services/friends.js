@@ -17,19 +17,21 @@ export const searchUsers = async (query) => {
 };
 
 export const sendFriendRequest = async (username) => {
+    const trimmed = typeof username === "string" ? username.trim() : username;
     const response = await api.post("/friends/request/", {
-        friend_username: username.trim(),
+        username: trimmed,
+        friend_username: trimmed,
     });
     return response.data;
 };
 
 export const acceptFriendRequest = async (friendshipId) => {
-    const response = await api.post(`/friends/requests/${friendshipId}/accept/`);
+    const response = await api.post(`/friends/${friendshipId}/accept/`);
     return response.data;
 };
 
 export const declineFriendRequest = async (friendshipId) => {
-    const response = await api.post(`/friends/requests/${friendshipId}/decline/`);
+    const response = await api.post(`/friends/${friendshipId}/decline/`);
     return response.data;
 };
 

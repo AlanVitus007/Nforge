@@ -986,14 +986,16 @@ function ProjectDetails() {
                                 ) : (
                                     <div className="invite-friends-options-list">
                                         {friendsList.map((f) => {
-                                            const friendUser = f.user_username === user?.username ? f.friend_username : f.user_username;
+                                            const friendUser = f.user?.username || f.other_username || (f.user_username === user?.username ? f.friend_username : f.user_username);
+                                            if (!friendUser) return null;
+                                            const friendshipId = f.id || f.friendship_id;
                                             const isAlreadyMember = members.some(
                                                 (m) => m.username.toLowerCase() === friendUser.toLowerCase()
                                             ) || (project.owner && project.owner.toLowerCase() === friendUser.toLowerCase());
 
                                             return (
                                                 <label 
-                                                    key={f.id} 
+                                                    key={friendshipId} 
                                                     className={`invite-friend-row ${selectedFriend === friendUser ? 'selected' : ''} ${isAlreadyMember ? 'disabled' : ''}`}
                                                 >
                                                     <div className="invite-friend-radio-label">

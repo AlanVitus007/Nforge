@@ -34,8 +34,8 @@ const Friends = () => {
       setError('');
       const data = await getFriends();
       setFriends(data.friends || []);
-      setIncomingRequests(data.incoming_requests || []);
-      setSentRequests(data.sent_requests || []);
+      setIncomingRequests(data.incoming_requests || data.incoming || []);
+      setSentRequests(data.sent_requests || data.outgoing || []);
     } catch (err) {
       console.error('Failed to load friends:', err);
       setError('Unable to load friends data. Please try again.');
@@ -82,7 +82,7 @@ const Friends = () => {
       setActionSuccess(`Friend request sent to ${username}`);
       await fetchFriendships();
     } catch (err) {
-      const msg = err.response?.data?.error || 'Failed to send friend request.';
+      const msg = err.response?.data?.error || err.response?.data?.detail || 'Failed to send friend request.';
       setError(msg);
     } finally {
       setSubmittingAction((prev) => ({ ...prev, [username]: false }));
@@ -98,7 +98,7 @@ const Friends = () => {
       setActionSuccess(`Accepted friend request from ${username}`);
       await fetchFriendships();
     } catch (err) {
-      const msg = err.response?.data?.error || 'Failed to accept friend request.';
+      const msg = err.response?.data?.error || err.response?.data?.detail || 'Failed to accept friend request.';
       setError(msg);
     } finally {
       setSubmittingAction((prev) => ({ ...prev, [friendshipId]: false }));
@@ -114,7 +114,7 @@ const Friends = () => {
       setActionSuccess(`Declined request from ${username}`);
       await fetchFriendships();
     } catch (err) {
-      const msg = err.response?.data?.error || 'Failed to decline friend request.';
+      const msg = err.response?.data?.error || err.response?.data?.detail || 'Failed to decline friend request.';
       setError(msg);
     } finally {
       setSubmittingAction((prev) => ({ ...prev, [friendshipId]: false }));
@@ -133,7 +133,7 @@ const Friends = () => {
       setActionSuccess(`Removed ${username} from friends`);
       await fetchFriendships();
     } catch (err) {
-      const msg = err.response?.data?.error || 'Failed to remove friend.';
+      const msg = err.response?.data?.error || err.response?.data?.detail || 'Failed to remove friend.';
       setError(msg);
     } finally {
       setSubmittingAction((prev) => ({ ...prev, [friendshipId]: false }));
@@ -142,16 +142,25 @@ const Friends = () => {
 
   // Determine user relationship status for search results
   const getRelationshipStatus = (targetUsername) => {
+    if (!targetUsername) return 'NONE';
+    const target = targetUsername.toLowerCase();
+
     const isFriend = friends.some((f) => {
-      const otherUser = f.user_username === user?.username ? f.friend_username : f.user_username;
-      return otherUser === targetUsername;
+      const otherUser = f.user?.username || f.other_username || (f.user_username === user?.username ? f.friend_username : f.user_username);
+      return otherUser && otherUser.toLowerCase() === target;
     });
     if (isFriend) return 'FRIEND';
 
-    const hasSent = sentRequests.some((r) => r.friend_username === targetUsername);
+    const hasSent = sentRequests.some((r) => {
+      const targetName = r.to_user?.username || r.friend_username;
+      return targetName && targetName.toLowerCase() === target;
+    });
     if (hasSent) return 'SENT';
 
-    const hasIncoming = incomingRequests.some((r) => r.user_username === targetUsername);
+    const hasIncoming = incomingRequests.some((r) => {
+      const fromName = r.from_user?.username || r.user_username;
+      return fromName && fromName.toLowerCase() === target;
+    });
     if (hasIncoming) return 'INCOMING';
 
     return 'NONE';
@@ -232,7 +241,11 @@ const Friends = () => {
             <h3 className="section-subheading">Search Results ({searchResults.length})</h3>
             <div className="friends-list">
               {searchResults.map((u) => {
-                const rel = getRelationshipStatus(u.username);
+                const computedRel = getRelationshipStatus(u.username);
+                const rel = computedRel !== 'NONE'
+                  ? computedRel
+                  : (u.friendship_status === 'OUTGOING' ? 'SENT' : u.friendship_status || 'NONE');
+
                 return (
                   <div key={u.id} className="friend-card">
                     <div className="friend-info">
@@ -299,9 +312,11 @@ const Friends = () => {
           ) : (
             <div className="friends-list">
               {friends.map((f) => {
-                const otherUsername = f.user_username === user?.username ? f.friend_username : f.user_username;
+                const otherUsername = f.user?.username || f.other_username || (f.user_username === user?.username ? f.friend_username : f.user_username) || 'Collaborator';
+                const friendshipId = f.id || f.friendship_id;
+
                 return (
-                  <div key={f.id} className="friend-card">
+                  <div key={friendshipId} className="friend-card">
                     <div className="friend-info">
                       <div className="friend-avatar" aria-hidden="true">
                         {getInitials(otherUsername)}
@@ -314,11 +329,11 @@ const Friends = () => {
                     <div className="friend-action">
                       <Button
                         variant="danger"
-                        onClick={() => handleRemoveFriend(f.id, otherUsername)}
-                        disabled={submittingAction[f.id]}
+                        onClick={() => handleRemoveFriend(friendshipId, otherUsername)}
+                        disabled={submittingAction[friendshipId]}
                         aria-label={`Remove ${otherUsername} from friends`}
                       >
-                        {submittingAction[f.id] ? 'Removing...' : 'Remove'}
+                        {submittingAction[friendshipId] ? 'Removing...' : 'Remove'}
                       </Button>
                     </div>
                   </div>
@@ -345,36 +360,41 @@ const Friends = () => {
               <p className="friends-empty-text">No incoming friend requests.</p>
             ) : (
               <div className="friends-list">
-                {incomingRequests.map((req) => (
-                  <div key={req.id} className="friend-card">
-                    <div className="friend-info">
-                      <div className="friend-avatar" aria-hidden="true">
-                        {getInitials(req.user_username)}
+                {incomingRequests.map((req) => {
+                  const fromUsername = req.from_user?.username || req.user_username || 'Researcher';
+                  const reqId = req.id || req.friendship_id;
+
+                  return (
+                    <div key={reqId} className="friend-card">
+                      <div className="friend-info">
+                        <div className="friend-avatar" aria-hidden="true">
+                          {getInitials(fromUsername)}
+                        </div>
+                        <div className="friend-meta">
+                          <span className="friend-username">{fromUsername}</span>
+                          <span className="friend-date">Sent request</span>
+                        </div>
                       </div>
-                      <div className="friend-meta">
-                        <span className="friend-username">{req.user_username}</span>
-                        <span className="friend-date">Sent request</span>
+                      <div className="friend-action-group">
+                        <Button
+                          onClick={() => handleAcceptRequest(reqId, fromUsername)}
+                          disabled={submittingAction[reqId]}
+                          aria-label={`Accept request from ${fromUsername}`}
+                        >
+                          Accept
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          onClick={() => handleDeclineRequest(reqId, fromUsername)}
+                          disabled={submittingAction[reqId]}
+                          aria-label={`Decline request from ${fromUsername}`}
+                        >
+                          Decline
+                        </Button>
                       </div>
                     </div>
-                    <div className="friend-action-group">
-                      <Button
-                        onClick={() => handleAcceptRequest(req.id, req.user_username)}
-                        disabled={submittingAction[req.id]}
-                        aria-label={`Accept request from ${req.user_username}`}
-                      >
-                        Accept
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        onClick={() => handleDeclineRequest(req.id, req.user_username)}
-                        disabled={submittingAction[req.id]}
-                        aria-label={`Decline request from ${req.user_username}`}
-                      >
-                        Decline
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </section>
@@ -394,22 +414,27 @@ const Friends = () => {
               <p className="friends-empty-text">No pending sent requests.</p>
             ) : (
               <div className="friends-list">
-                {sentRequests.map((req) => (
-                  <div key={req.id} className="friend-card">
-                    <div className="friend-info">
-                      <div className="friend-avatar" aria-hidden="true">
-                        {getInitials(req.friend_username)}
+                {sentRequests.map((req) => {
+                  const toUsername = req.to_user?.username || req.friend_username || 'Researcher';
+                  const reqId = req.id || req.friendship_id;
+
+                  return (
+                    <div key={reqId} className="friend-card">
+                      <div className="friend-info">
+                        <div className="friend-avatar" aria-hidden="true">
+                          {getInitials(toUsername)}
+                        </div>
+                        <div className="friend-meta">
+                          <span className="friend-username">{toUsername}</span>
+                          <span className="friend-date">Awaiting acceptance</span>
+                        </div>
                       </div>
-                      <div className="friend-meta">
-                        <span className="friend-username">{req.friend_username}</span>
-                        <span className="friend-date">Awaiting acceptance</span>
+                      <div className="friend-action">
+                        <span className="status-badge status-badge-pending">Pending</span>
                       </div>
                     </div>
-                    <div className="friend-action">
-                      <span className="status-badge status-badge-pending">Pending</span>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </section>

@@ -28,9 +28,16 @@ class FriendListView(APIView):
         for f in accepted:
             other_user = f.friend if f.user == user else f.user
             friends_list.append({
+                "id": f.id,
                 "friendship_id": f.id,
+                "user_id": f.user_id,
+                "user_username": f.user.username,
+                "friend_id": f.friend_id,
+                "friend_username": f.friend.username,
+                "other_username": other_user.username,
                 "user": SafeUserSerializer(other_user).data,
                 "created_at": f.created_at,
+                "updated_at": f.updated_at,
             })
 
         # Incoming pending requests sent TO this user
@@ -41,7 +48,10 @@ class FriendListView(APIView):
 
         incoming_list = [
             {
+                "id": f.id,
                 "friendship_id": f.id,
+                "user_id": f.user_id,
+                "user_username": f.user.username,
                 "from_user": SafeUserSerializer(f.user).data,
                 "created_at": f.created_at,
             }
@@ -56,7 +66,10 @@ class FriendListView(APIView):
 
         outgoing_list = [
             {
+                "id": f.id,
                 "friendship_id": f.id,
+                "friend_id": f.friend_id,
+                "friend_username": f.friend.username,
                 "to_user": SafeUserSerializer(f.friend).data,
                 "created_at": f.created_at,
                 "status": f.status,
@@ -67,7 +80,9 @@ class FriendListView(APIView):
         return Response({
             "friends": friends_list,
             "incoming": incoming_list,
+            "incoming_requests": incoming_list,
             "outgoing": outgoing_list,
+            "sent_requests": outgoing_list,
         })
 
 
@@ -140,12 +155,13 @@ class FriendRequestCreateView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        username = request.data.get("username")
+        username = request.data.get("username") or request.data.get("friend_username")
         user_id = request.data.get("user_id")
 
         if not username and not user_id:
+            msg = "Username or user_id is required."
             return Response(
-                {"detail": "Username or user_id is required."},
+                {"detail": msg, "error": msg},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -155,14 +171,16 @@ class FriendRequestCreateView(APIView):
             target_user = User.objects.filter(username=str(username).strip(), is_active=True).first()
 
         if not target_user:
+            msg = f"User '{username or user_id}' does not exist."
             return Response(
-                {"detail": f"User '{username or user_id}' does not exist."},
+                {"detail": msg, "error": msg},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
         if target_user.id == request.user.id:
+            msg = "You cannot send a friend request to yourself."
             return Response(
-                {"detail": "You cannot send a friend request to yourself."},
+                {"detail": msg, "error": msg},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -174,13 +192,15 @@ class FriendRequestCreateView(APIView):
 
         if existing:
             if existing.status == Friendship.STATUS_ACCEPTED:
+                msg = "You are already friends with this user."
                 return Response(
-                    {"detail": "You are already friends with this user."},
+                    {"detail": msg, "error": msg},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             if existing.status == Friendship.STATUS_PENDING:
+                msg = "A friend request is already pending between you and this user."
                 return Response(
-                    {"detail": "A friend request is already pending between you and this user."},
+                    {"detail": msg, "error": msg},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             # If declined previously, reset to pending from current user

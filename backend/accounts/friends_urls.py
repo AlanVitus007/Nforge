@@ -13,6 +13,8 @@ urlpatterns = [
     path("search/", FriendSearchView.as_view(), name="friends-search"),
     path("request/", FriendRequestCreateView.as_view(), name="friends-request-create"),
     path("<int:friendship_id>/accept/", FriendRequestAcceptView.as_view(), name="friends-accept"),
+    path("requests/<int:friendship_id>/accept/", FriendRequestAcceptView.as_view(), name="friends-requests-accept"),
     path("<int:friendship_id>/decline/", FriendRequestDeclineView.as_view(), name="friends-decline"),
+    path("requests/<int:friendship_id>/decline/", FriendRequestDeclineView.as_view(), name="friends-requests-decline"),
     path("<int:friendship_id>/", FriendRemoveView.as_view(), name="friends-remove"),
 ]
