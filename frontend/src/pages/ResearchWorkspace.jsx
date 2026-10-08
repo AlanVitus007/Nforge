@@ -680,16 +680,14 @@ function ResearchWorkspace() {
             const sessionData = res.data;
             setActiveSession(sessionData);
 
-            // Set selected paper to first paper in this session
+            // Initialize comparison, gap, thematic, and trend selections from session papers
             if (sessionData.papers && sessionData.papers.length > 0) {
-                setSelectedPaperId(String(sessionData.papers[0].id));
                 const compPaperIds = sessionData.papers.slice(0, 4).map((p) => p.id);
                 setSelectedComparisonPaperIds(compPaperIds);
                 setSelectedGapPaperIds(compPaperIds);
                 setSelectedThematicPaperIds(compPaperIds);
                 setSelectedTrendPaperIds(compPaperIds);
             } else {
-                setSelectedPaperId('');
                 setSelectedComparisonPaperIds([]);
                 setSelectedGapPaperIds([]);
                 setSelectedThematicPaperIds([]);
@@ -806,7 +804,6 @@ function ResearchWorkspace() {
                 ...newSession,
                 messages: []
             });
-            setSelectedPaperId('');
             setSelectedComparisonPaperIds([]);
             setSelectedGapPaperIds([]);
             setSelectedThematicPaperIds([]);
