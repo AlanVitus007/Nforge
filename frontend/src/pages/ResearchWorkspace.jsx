@@ -5,6 +5,7 @@ import { askResearchSession } from '../services/ai';
 import { AuthContext } from '../context/AuthContext';
 import EvidenceSource from '../components/EvidenceSource';
 import DeleteModal from '../components/DeleteModal';
+import MarkdownRenderer from '../components/MarkdownRenderer';
 import { getProjectMembers, determineUserRole } from '../services/collaboration';
 import './ResearchWorkspace.css';
 
@@ -1758,9 +1759,7 @@ function ResearchWorkspace() {
                                     <h4 className="comparison-box-title" style={{ color: 'var(--accent-primary)' }}>
                                         Overall Synthesis
                                     </h4>
-                                    <p style={{ margin: 0, lineHeight: 1.6, color: 'var(--text-primary)' }}>
-                                        {parsedComp.overall_synthesis}
-                                    </p>
+                                    <MarkdownRenderer content={parsedComp.overall_synthesis} />
                                 </div>
                             )}
 
@@ -1915,9 +1914,7 @@ function ResearchWorkspace() {
                                     <h4 className="comparison-box-title" style={{ color: 'var(--accent-primary)' }}>
                                         Overall Assessment
                                     </h4>
-                                    <p style={{ margin: 0, lineHeight: 1.6, color: 'var(--text-primary)' }}>
-                                        {parsedGap.overall_assessment}
-                                    </p>
+                                    <MarkdownRenderer content={parsedGap.overall_assessment} />
                                 </div>
                             )}
 
@@ -2097,9 +2094,7 @@ function ResearchWorkspace() {
                                     <h4 className="comparison-box-title" style={{ color: 'var(--accent-primary)' }}>
                                         Overall Synthesis
                                     </h4>
-                                    <p style={{ margin: 0, lineHeight: 1.6, color: 'var(--text-primary)' }}>
-                                        {parsedThematic.overall_synthesis}
-                                    </p>
+                                    <MarkdownRenderer content={parsedThematic.overall_synthesis} />
                                 </div>
                             )}
 
@@ -2194,9 +2189,7 @@ function ResearchWorkspace() {
                                     <h4 className="comparison-box-title" style={{ color: 'var(--accent-primary)' }}>
                                         Overall Research Trend
                                     </h4>
-                                    <p style={{ margin: 0, lineHeight: 1.6, color: 'var(--text-primary)' }}>
-                                        {parsedTrend.overall_trend}
-                                    </p>
+                                    <MarkdownRenderer content={parsedTrend.overall_trend} />
                                 </div>
                             )}
 
@@ -2358,7 +2351,9 @@ function ResearchWorkspace() {
                             )}
                         </div>
                     ) : (
-                        <p className="message-text">{msg.content}</p>
+                        <div className="message-markdown-wrap">
+                            <MarkdownRenderer content={msg.content} />
+                        </div>
                     )}
 
                     {/* Saved Grounded Evidence Sources (Single-Paper Ask) */}
