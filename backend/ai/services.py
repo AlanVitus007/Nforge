@@ -2149,4 +2149,230 @@ Source Excerpts:
         **trend_data,
     }
 
+
+def retrieve_session_evidence(question, papers, top_k_per_paper=5, max_total_chunks=30):
+    """
+    Retrieve relevant evidence chunks across all papers in a research session.
+    No arbitrary 4-paper restriction: supports any number of papers attached to the session.
+    Uses local SentenceTransformer embeddings and cosine similarity (0 Gemini calls).
+
+    Parameters
+    ----------
+    question : str
+        The query/question string. Must be non-empty.
+    papers : list | QuerySet
+        A list or QuerySet of Paper model instances.
+    top_k_per_paper : int, optional
+        Maximum number of top evidence chunks to return per paper (default 5).
+    max_total_chunks : int, optional
+        Maximum total evidence chunks across all papers (default 30).
+
+    Returns
+    -------
+    list of dict
+        Grouped evidence structures per paper containing paper metadata and sorted source chunks.
+    """
+    from papers.models import Paper
+
+    if not question or not isinstance(question, str) or not question.strip():
+        raise ValueError("question must be a non-empty string.")
+
+    if not papers:
+        raise ValueError("papers must be a non-empty list of Paper instances.")
+
+    papers_list = list(papers)
+    for p in papers_list:
+        if not isinstance(p, Paper):
+            raise ValueError("Each item in papers must be a valid Paper instance.")
+
+    # Generate query embedding ONCE for performance
+    query_embedding = np.array(generate_embedding(question.strip()))
+
+    # Fetch chunks for all session papers
+    all_chunks = PaperChunk.objects.filter(paper__in=papers_list).select_related("paper")
+
+    chunks_by_paper = {}
+    for chunk in all_chunks:
+        chunks_by_paper.setdefault(chunk.paper_id, []).append(chunk)
+
+    grouped_results = []
+
+    for paper in papers_list:
+        paper_chunks = chunks_by_paper.get(paper.id, [])
+        scored_sources = []
+
+        for chunk in paper_chunks:
+            if chunk.embedding:
+                chunk_embedding = np.array(chunk.embedding)
+                similarity = float(np.dot(query_embedding, chunk_embedding))
+            else:
+                similarity = 0.0
+
+            scored_sources.append({
+                "chunk": chunk,
+                "chunk_id": chunk.id,
+                "chunk_index": chunk.chunk_index,
+                "page_number": chunk.page_number,
+                "text": chunk.text,
+                "similarity": similarity,
+                "paper_id": paper.id,
+                "paper_title": paper.title,
+            })
+
+        # Sort sources within each paper by similarity descending
+        scored_sources.sort(key=lambda s: s["similarity"], reverse=True)
+        top_paper_sources = scored_sources[:top_k_per_paper]
+
+        grouped_results.append({
+            "paper_id": paper.id,
+            "paper_title": paper.title,
+            "sources": top_paper_sources,
+        })
+
+    return grouped_results
+
+
+def generate_research_answer(question, session):
+    """
+    Generate ONE grounded, conversational multi-paper research answer across all
+    papers attached to the given ResearchSession.
+
+    1. Receives the ResearchSession.
+    2. Retrieves all papers attached to that session (session.papers.all()).
+    3. Verifies the session has papers.
+    4. Retrieves relevant PaperChunk evidence across those papers using retrieve_session_evidence.
+    5. Generates ONE grounded answer using the combined evidence (1 Gemini call).
+    6. Returns evidence/source information for the papers that actually support the answer.
+    7. Includes citation_id and citation_map using existing citation infrastructure.
+    """
+    if not session or not session.pk:
+        raise ValueError("Valid ResearchSession instance is required.")
+
+    papers = list(session.papers.all())
+    if not papers:
+        raise ValueError("Add research papers to this session to start asking questions.")
+
+    # Cross-project validation
+    for p in papers:
+        if p.project_id != session.project_id:
+            raise ValueError(f"Paper '{p.title}' does not belong to the session project.")
+
+    query_text = question.strip() if (question and isinstance(question, str)) else ""
+    if not query_text:
+        raise ValueError("question must be a non-empty string.")
+
+    # Retrieve evidence across all session papers (no 4-paper limit)
+    retrieved_groups = retrieve_session_evidence(
+        question=query_text,
+        papers=papers,
+        top_k_per_paper=5,
+        max_total_chunks=30,
+    )
+
+    # Collect candidate chunks across all session papers
+    candidate_sources = []
+    for group in retrieved_groups:
+        for src in group["sources"]:
+            candidate_sources.append(src)
+
+    if not candidate_sources:
+        return {
+            "answer": "I could not find relevant information across the papers in this research session to answer your question.",
+            "sources": [],
+            "citation_map": {},
+        }
+
+    # If total chunks exceed 30, prioritize highest similarity across papers
+    if len(candidate_sources) > 30:
+        candidate_sources.sort(key=lambda s: s["similarity"], reverse=True)
+        candidate_sources = candidate_sources[:30]
+
+    # Re-group candidate sources by paper for clean prompt context
+    sources_by_paper = {}
+    for src in candidate_sources:
+        sources_by_paper.setdefault(src["paper_id"], []).append(src)
+
+    context_blocks = []
+    for paper in papers:
+        paper_srcs = sources_by_paper.get(paper.id, [])
+        if not paper_srcs:
+            continue
+        paper_block = [f"PAPER: '{paper.title}' (ID: {paper.id})"]
+        for s in paper_srcs:
+            page_str = f"Page {s['page_number']}" if s.get("page_number") else "Page 1"
+            paper_block.append(f"SOURCE (Page: {page_str}, Chunk ID: {s['chunk_id']}):\n{s['text']}")
+        context_blocks.append("\n\n".join(paper_block))
+
+    combined_context = "\n\n---\n\n".join(context_blocks)
+    paper_titles_str = ", ".join([f"'{p.title}'" for p in papers])
+
+    prompt = f"""You are an academic research assistant synthesizing findings across multiple papers in a research session.
+
+Papers in this session: {paper_titles_str}
+
+Answer the user's question by synthesizing information across the provided paper sources.
+Provide a unified, grounded, conversational research answer.
+
+Rules:
+- Base your answer ONLY on the provided paper sources.
+- Do not invent information or use outside knowledge.
+- Synthesize across papers when multiple papers discuss the topic.
+- Attribute claims accurately to the relevant papers when discussing specific findings, methodologies, or contributions.
+- If the papers do not contain sufficient information to answer the question, state that clearly.
+- Do not refer to sources as "chunks" or mention similarity scores.
+- Be concise, clear, scholarly, and direct.
+
+User question:
+{query_text}
+
+Session Papers Sources:
+{combined_context}
+"""
+
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY is not configured.")
+
+    client = genai.Client(api_key=api_key)
+
+    print("[Research Ask] Making Gemini call for multi-paper question")
+    response = _call_gemini(client, prompt, feature_name="research_ask")
+
+    from .citations import (
+        build_citation_id,
+        build_citation_map,
+        get_citation_number_for_id,
+        format_citation_label,
+    )
+
+    sources = []
+    for index, src in enumerate(candidate_sources):
+        chunk = src["chunk"]
+        sources.append({
+            "source_number": index + 1,
+            "citation_id": build_citation_id(chunk.paper.id, chunk.id),
+            "paper_id": chunk.paper.id,
+            "paper_title": chunk.paper.title,
+            "chunk_id": chunk.id,
+            "chunk_index": chunk.chunk_index,
+            "page_number": chunk.page_number,
+            "text": chunk.text,
+        })
+
+    citation_map = build_citation_map(sources, expected_project=session.project_id)
+
+    for src in sources:
+        cid = src.get("citation_id")
+        num = get_citation_number_for_id(citation_map, cid)
+        if num is not None:
+            src["citation_number"] = num
+            src["citation_label"] = format_citation_label(num)
+
+    return {
+        "answer": response.text,
+        "sources": sources,
+        "citation_map": citation_map,
+    }
+
+
 

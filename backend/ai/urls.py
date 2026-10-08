@@ -10,10 +10,12 @@ from .views import (
     research_trends_view,
     session_list_create_view,
     session_detail_view,
+    research_ask_view,
 )
 
 urlpatterns = [
     path("ask/", ask_ai, name="ask-ai"),
+    path("research-ask/", research_ask_view, name="research-ask"),
     path("summary/", generate_summary_view, name="paper-summary"),
     path("research-gaps/", generate_research_gaps_view, name="research-gaps"),
     path("compare/", compare_papers_view, name="compare-papers"),

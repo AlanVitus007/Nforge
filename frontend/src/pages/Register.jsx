@@ -21,7 +21,35 @@ const Register = () => {
             await login(username, password);
             navigate('/dashboard');
         } catch (err) {
-            setError(err.response?.data?.username?.[0] || 'Registration failed. Please try again.');
+            const data = err.response?.data;
+            let msg = '';
+            if (data) {
+                if (typeof data === 'string') {
+                    msg = data;
+                } else if (data.username?.[0]) {
+                    msg = data.username[0];
+                } else if (data.password?.[0]) {
+                    msg = data.password[0];
+                } else if (data.email?.[0]) {
+                    msg = data.email[0];
+                } else if (data.detail) {
+                    msg = data.detail;
+                } else if (data.error) {
+                    msg = data.error;
+                } else if (data.non_field_errors?.[0]) {
+                    msg = data.non_field_errors[0];
+                } else {
+                    const firstVal = Object.values(data)[0];
+                    if (Array.isArray(firstVal) && firstVal[0]) {
+                        msg = firstVal[0];
+                    } else if (typeof firstVal === 'string') {
+                        msg = firstVal;
+                    }
+                }
+            } else if (err.message) {
+                msg = `Network error (${err.message}). Verify backend server is running and reachable.`;
+            }
+            setError(msg || 'Registration failed. Please try again.');
         }
     };
 

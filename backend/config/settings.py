@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
 import os
+import socket
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -30,14 +31,30 @@ SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-fallback-key-do-not-u
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'False').lower() in ('true', '1', 't')
 
+# Determine local machine LAN IP to automatically permit LAN connections
+def _detect_lan_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('8.8.8.8', 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return None
+
+_local_lan_ip = _detect_lan_ip()
+
 # Allowed hosts configured via environment variable (comma-separated), with sensible localhost defaults
 raw_allowed_hosts = os.environ.get('ALLOWED_HOSTS', '')
+base_hosts = ["localhost", "127.0.0.1", "0.0.0.0"]
+if _local_lan_ip:
+    base_hosts.append(_local_lan_ip)
+
 if raw_allowed_hosts:
-    ALLOWED_HOSTS = list(dict.fromkeys(
-        [h.strip() for h in raw_allowed_hosts.split(',') if h.strip()] + ["localhost", "127.0.0.1"]
-    ))
+    env_hosts = [h.strip() for h in raw_allowed_hosts.split(',') if h.strip()]
+    ALLOWED_HOSTS = list(dict.fromkeys(base_hosts + env_hosts))
 else:
-    ALLOWED_HOSTS = ["localhost", "127.0.0.1", "0.0.0.0"]
+    ALLOWED_HOSTS = base_hosts
 
 
 # Application definition
@@ -163,6 +180,11 @@ default_cors_origins = [
     "http://localhost:5174",
     "http://127.0.0.1:5174",
 ]
+if _local_lan_ip:
+    default_cors_origins.extend([
+        f"http://{_local_lan_ip}:5173",
+        f"http://{_local_lan_ip}:5174",
+    ])
 cors_env = os.environ.get('CORS_ALLOWED_ORIGINS', '')
 if cors_env:
     parsed_origins = [

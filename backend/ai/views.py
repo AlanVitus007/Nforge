@@ -25,6 +25,7 @@ from .services import (
     generate_research_gap_analysis,
     generate_thematic_analysis,
     generate_research_trend_analysis,
+    generate_research_answer,
     RateLimitError,
 )
 
@@ -168,6 +169,119 @@ def ask_ai(request):
 
     except Exception as e:
         return handle_ai_exception(e)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def research_ask_view(request):
+    """
+    POST /api/ai/research-ask/
+    Multi-paper research chat for the Research Workspace.
+    Uses all papers attached to the current research session.
+    Determines papers from ResearchSession (does NOT trust a frontend paper ID).
+    """
+    try:
+        question = request.data.get("question")
+        session_id = request.data.get("session_id")
+
+        if not question or not str(question).strip():
+            return Response({
+                "error": "question is required",
+                "code": "BAD_REQUEST"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if not session_id:
+            return Response({
+                "error": "session_id is required",
+                "code": "BAD_REQUEST"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            session = ResearchSession.objects.select_related("project").get(id=session_id)
+        except ResearchSession.DoesNotExist:
+            return Response({
+                "error": "Research session not found.",
+                "code": "NOT_FOUND"
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        if not can_view_project(request.user, session.project):
+            return Response({
+                "error": "Access denied.",
+                "code": "FORBIDDEN"
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        if not can_write_research(request.user, session.project):
+            return Response({
+                "error": "Viewers cannot generate research questions. Write permission required.",
+                "code": "FORBIDDEN"
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        session_papers = list(session.papers.all())
+        if not session_papers:
+            return Response({
+                "error": "Add research papers to this session to start asking questions.",
+                "code": "BAD_REQUEST"
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        for p in session_papers:
+            if p.project_id != session.project_id:
+                return Response({
+                    "error": f"Paper '{p.title}' does not belong to the session project.",
+                    "code": "BAD_REQUEST"
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            user_msg = ResearchMessage.objects.create(
+                session=session,
+                role=ResearchMessage.ROLE_USER,
+                content=question.strip(),
+            )
+
+            ai_response = generate_research_answer(question.strip(), session)
+
+            assistant_msg = ResearchMessage.objects.create(
+                session=session,
+                role=ResearchMessage.ROLE_ASSISTANT,
+                content=ai_response["answer"],
+            )
+
+            created_evidences = []
+            paper_map = {p.id: p for p in session_papers}
+
+            for source in ai_response.get("sources", []):
+                chunk_obj = None
+                cid = source.get("chunk_id")
+                if cid:
+                    chunk_obj = PaperChunk.objects.filter(id=cid).first()
+
+                pid = source.get("paper_id")
+                paper_obj = paper_map.get(pid)
+                if not paper_obj and chunk_obj:
+                    paper_obj = chunk_obj.paper
+
+                if paper_obj and paper_obj in session_papers:
+                    ev = ResearchEvidence.objects.create(
+                        message=assistant_msg,
+                        paper=paper_obj,
+                        chunk=chunk_obj,
+                        page_number=source.get("page_number"),
+                        text=source.get("text") or "",
+                    )
+                    created_evidences.append(ev)
+
+            from .citations import build_citation_map
+            ai_response["citation_map"] = build_citation_map(
+                created_evidences,
+                expected_project=session.project_id
+            )
+
+            session.save()
+            ai_response["session_id"] = session.id
+            return Response(ai_response, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        return handle_ai_exception(e)
+
 
 
 @api_view(["POST"])

@@ -1,6 +1,7 @@
 import { useEffect, useState, useContext, useCallback, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import api from '../services/api';
+import { askResearchSession } from '../services/ai';
 import { AuthContext } from '../context/AuthContext';
 import EvidenceSource from '../components/EvidenceSource';
 import DeleteModal from '../components/DeleteModal';
@@ -102,33 +103,28 @@ function formatSessionTime(isoString) {
 }
 
 /**
- * Research prompt shortcuts for Single-Paper analysis.
+ * Research prompt shortcuts for Multi-Paper session research.
  */
-const SINGLE_PAPER_SHORTCUTS = [
+const SESSION_RESEARCH_SHORTCUTS = [
     {
-        label: 'Summarize this paper',
-        prompt: 'Summarize this paper and explain its main contribution.'
+        label: 'Summarize the research',
+        prompt: 'Summarize the research and synthesize the main contributions across these papers.'
     },
     {
-        label: 'Explain the methodology',
-        prompt: 'Explain the methodology used in this paper, including the study design, data, methods, and evaluation approach.'
+        label: 'Explain the methodologies',
+        prompt: 'Explain the methodologies used across these papers, comparing their approaches, data, and evaluation techniques.'
     },
     {
         label: 'Identify key findings',
-        prompt: 'Identify the key findings and results reported in this paper.'
+        prompt: 'Identify and synthesize the key findings and results across these papers.'
     },
     {
         label: 'Identify limitations',
-        prompt: 'Identify the main limitations acknowledged or evident from this paper.'
+        prompt: 'Identify the main limitations and caveats evident across these papers.'
     },
-    // Temporarily hidden: Research Gap shortcut button
-    // {
-    //     label: 'Find research gaps',
-    //     prompt: 'Identify research gaps suggested by this paper.'
-    // },
     {
-        label: 'Suggest future research directions',
-        prompt: 'Suggest possible future research directions based on the gaps and limitations discussed in this paper.'
+        label: 'Suggest future directions',
+        prompt: 'Suggest possible future research directions based on the collective findings and limitations across these papers.'
     }
 ];
 
@@ -510,11 +506,10 @@ function ResearchWorkspace() {
     const [savingPapers, setSavingPapers] = useState(false);
     const [removingPaperId, setRemovingPaperId] = useState(null);
 
-    // Chat Mode: 'ask' (single-paper) or 'compare' (multi-paper)
+    // Chat Mode: 'ask' (multi-paper session chat) or 'compare' (multi-paper comparison)
     const [chatMode, setChatMode] = useState('ask');
 
-    // Live Single-Paper Ask Question State
-    const [selectedPaperId, setSelectedPaperId] = useState('');
+    // Live Multi-Paper Session Ask Question State
     const [questionText, setQuestionText] = useState('');
     const [loadingAsk, setLoadingAsk] = useState(false);
     const [askError, setAskError] = useState('');
@@ -959,12 +954,6 @@ function ResearchWorkspace() {
                 updated_at: updated.updated_at
             }));
 
-            // If selectedPaperId is no longer in papers, update it
-            const paperStillSelected = updated.papers?.some((p) => String(p.id) === selectedPaperId);
-            if (!paperStillSelected) {
-                setSelectedPaperId(updated.papers?.[0]?.id ? String(updated.papers[0].id) : '');
-            }
-
             // Keep comparison selection in sync with updated papers
             setSelectedComparisonPaperIds((prev) => {
                 const validIds = prev.filter((id) => selectedModalPaperIds.includes(id));
@@ -1039,9 +1028,7 @@ function ResearchWorkspace() {
                 updated_at: updated.updated_at
             }));
 
-            if (selectedPaperId === String(paperIdToRemove)) {
-                setSelectedPaperId(updated.papers?.[0]?.id ? String(updated.papers[0].id) : '');
-            }
+
 
             setSelectedComparisonPaperIds((prev) => prev.filter((id) => id !== paperIdToRemove));
             setSelectedGapPaperIds((prev) => prev.filter((id) => id !== paperIdToRemove));
@@ -1116,32 +1103,26 @@ function ResearchWorkspace() {
         });
     };
 
-    // Send Single-Paper Research Question via POST /api/ai/ask/
+    // Send Multi-Paper Research Question via POST /api/ai/research-ask/
     const handleSendQuestion = async () => {
         if (isViewer || loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend) return;
         const trimmed = questionText.trim();
         if (!trimmed) return;
-        if (!selectedPaperId || !activeSessionId) return;
+        if (!activeSessionId) return;
 
-        const paperIdInt = parseInt(selectedPaperId, 10);
-        if (isNaN(paperIdInt)) return;
+        if (!activeSession?.papers || activeSession.papers.length === 0) {
+            setAskError('Add research papers to this session to start asking questions.');
+            return;
+        }
 
         try {
             setLoadingAsk(true);
             setAskError('');
 
-            const res = await api.post('/ai/ask/', {
-                paper_id: paperIdInt,
-                question: trimmed,
-                session_id: activeSessionId
-            });
+            const data = await askResearchSession(trimmed, activeSessionId);
 
             // Question sent successfully, clear the input
             setQuestionText('');
-
-            // Resolve paper title from current session data
-            const currentPaper = activeSession.papers?.find((p) => p.id === paperIdInt);
-            const paperTitle = currentPaper ? currentPaper.title : 'Paper';
 
             const userMsg = {
                 id: `user-${Date.now()}`,
@@ -1153,15 +1134,16 @@ function ResearchWorkspace() {
             const assistantMsg = {
                 id: `assistant-${Date.now()}`,
                 role: 'ASSISTANT',
-                content: res.data.answer,
+                content: data.answer,
                 created_at: new Date().toISOString(),
-                evidence: (res.data.sources || []).map((src, idx) => ({
+                evidence: (data.sources || []).map((src, idx) => ({
                     id: src.chunk_id || `ev-${Date.now()}-${idx}`,
-                    paper_id: paperIdInt,
-                    paper_title: paperTitle,
+                    paper_id: src.paper_id,
+                    paper_title: src.paper_title || 'Paper',
                     chunk_id: src.chunk_id,
                     page_number: src.page_number,
-                    text: src.text
+                    text: src.text,
+                    citation_id: src.citation_id
                 }))
             };
 
@@ -1197,17 +1179,16 @@ function ResearchWorkspace() {
             } else if (err.response?.status === 401) {
                 setAskError('Authentication required.');
             } else if (err.response?.status === 403) {
-                setAskError('You do not have access to this research session.');
+                setAskError(err.response.data?.error || 'You do not have permission to ask questions in this session.');
             } else if (err.response?.status === 404) {
-                setAskError('Research session or paper not found.');
+                setAskError('Research session not found.');
             } else if (err.response?.status === 429) {
-                setAskError('Gemini API rate limit exceeded. Please try again later.');
+                setAskError('Gemini API rate limit exceeded. Please wait a moment and try again.');
             } else if (err.response?.status === 503) {
                 setAskError('Gemini is temporarily unavailable. Please try again shortly.');
             } else {
                 setAskError(err.response?.data?.error || 'Network or server error. Please try again.');
             }
-            // Keep questionText intact so user can retry manually
         } finally {
             setLoadingAsk(false);
         }
@@ -2867,7 +2848,7 @@ function ResearchWorkspace() {
                                 {loadingAsk && (
                                     <div className="ai-analyzing-banner">
                                         <span className="spinner-icon-sm"></span>
-                                        <span>NForge AI is analyzing the paper...</span>
+                                        <span>NForge AI is synthesizing research across session papers...</span>
                                     </div>
                                 )}
 
@@ -2933,7 +2914,7 @@ function ResearchWorkspace() {
                                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                                     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
                                                 </svg>
-                                                Ask Single Paper
+                                                Ask Research Question
                                             </button>
                                             <button
                                                 type="button"
@@ -2994,29 +2975,10 @@ function ResearchWorkspace() {
                                             </button>
                                         </div>
 
-                                        {/* MODE 1: Single-Paper Ask */}
+                                        {/* MODE 1: Multi-Paper Session Chat */}
                                         {chatMode === 'ask' && (
                                             <>
-                                                <div className="chat-selector-row">
-                                                    <label htmlFor="ask-paper-select" className="chat-selector-label">
-                                                        Ask about:
-                                                    </label>
-                                                    <select
-                                                        id="ask-paper-select"
-                                                        className="chat-paper-select"
-                                                        value={selectedPaperId}
-                                                        onChange={(e) => setSelectedPaperId(e.target.value)}
-                                                        disabled={isViewer || loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend}
-                                                    >
-                                                        {activeSession.papers.map((p) => (
-                                                            <option key={p.id} value={p.id}>
-                                                                {p.title}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                </div>
-
-                                                {/* Research Prompt Shortcuts for Single Paper */}
+                                                {/* Research Prompt Shortcuts for Session Papers */}
                                                 <div className="prompt-shortcuts-row">
                                                     <span className="prompt-shortcuts-label">
                                                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ opacity: 0.75 }}>
@@ -3024,12 +2986,12 @@ function ResearchWorkspace() {
                                                         </svg>
                                                         Research prompts:
                                                     </span>
-                                                    {SINGLE_PAPER_SHORTCUTS.map((item, idx) => (
+                                                    {SESSION_RESEARCH_SHORTCUTS.map((item, idx) => (
                                                         <button
                                                             key={idx}
                                                             type="button"
                                                             className="prompt-shortcut-btn"
-                                                            disabled={isViewer || loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend}
+                                                            disabled={isViewer || loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend || !activeSession.papers?.length}
                                                             onClick={() => setQuestionText(item.prompt)}
                                                             title={item.prompt}
                                                             aria-label={`Fill prompt: ${item.label}`}
@@ -3048,17 +3010,17 @@ function ResearchWorkspace() {
                                                 <div className="chat-input-row">
                                                     <textarea
                                                         className="chat-textarea"
-                                                        placeholder={isViewer ? "Read-only access — asking questions is disabled for viewers." : "Ask a research question... (Shift+Enter for newline)"}
+                                                        placeholder={isViewer ? "Read-only access — asking questions is disabled for viewers." : (!activeSession.papers?.length ? "Add research papers to this session to start asking questions." : "Ask a research question across session papers... (Shift+Enter for newline)")}
                                                         value={questionText}
                                                         onChange={(e) => setQuestionText(e.target.value)}
                                                         onKeyDown={handleKeyDown}
-                                                        disabled={isViewer || loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend}
+                                                        disabled={isViewer || loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend || !activeSession.papers?.length}
                                                         rows={2}
                                                     />
                                                     <button
                                                         className={`chat-send-btn ${isViewer ? 'read-only-btn' : ''}`}
                                                         onClick={handleSendQuestion}
-                                                        disabled={isViewer || loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend || !questionText.trim() || !selectedPaperId}
+                                                        disabled={isViewer || loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend || !questionText.trim() || !activeSession.papers?.length}
                                                         title={isViewer ? "Read-only access" : "Send question (Enter)"}
                                                         type="button"
                                                     >
@@ -3503,7 +3465,7 @@ function ResearchWorkspace() {
                                             <line x1="12" y1="8" x2="12" y2="12"></line>
                                             <line x1="12" y1="16" x2="12.01" y2="16"></line>
                                         </svg>
-                                        <span>Add at least one paper to this research session before asking questions.</span>
+                                        <span>Add research papers to this session to start asking questions.</span>
                                         {!isViewer && (
                                             <button
                                                 className="action-btn-secondary"

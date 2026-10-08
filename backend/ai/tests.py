@@ -1,5 +1,6 @@
 from django.test import TestCase
 from django.contrib.auth.models import User
+from unittest.mock import patch, MagicMock
 from projects.models import Project
 from papers.models import Paper
 from ai.models import PaperChunk, ResearchSession, ResearchMessage, ResearchEvidence
@@ -5407,6 +5408,360 @@ class CitationFormattingAndNumberingTests(TestCase):
         self.assertIn("1", data["citation_map"])
         # Verify evidence_id was populated upon session persistence
         self.assertIsNotNone(data["citation_map"]["1"]["evidence_id"])
+
+
+class MultiPaperResearchChatTests(TestCase):
+    """
+    Test suite for Phase 9.7: Multi-Paper Research Workspace Chat (/api/ai/research-ask/).
+    Verifies all 14 specified requirements:
+    1. Authenticated user can ask using session papers
+    2. Answer retrieves evidence from multiple papers
+    3. One paper may contribute evidence
+    4. Multiple papers may contribute evidence
+    5. Paper outside session cannot be used
+    6. Cross-project papers rejected
+    7. Viewer cannot generate (HTTP 403)
+    8. Editor can generate (HTTP 200)
+    9. Owner can generate (HTTP 200)
+    10. Missing session rejected (HTTP 404)
+    11. Session with no papers handled (HTTP 400)
+    12. Persistence creates USER + ASSISTANT + ResearchEvidence
+    13. Citation IDs resolve correctly
+    14. No Gemini call for unauthorized requests
+    """
+
+    def setUp(self):
+        from unittest.mock import MagicMock
+        from rest_framework.test import APIClient
+        from projects.models import ProjectMember
+        from ai.services import generate_research_answer, retrieve_session_evidence
+
+        self.owner = User.objects.create_user(username="mp_owner", password="password")
+        self.editor = User.objects.create_user(username="mp_editor", password="password")
+        self.viewer = User.objects.create_user(username="mp_viewer", password="password")
+        self.other_user = User.objects.create_user(username="mp_other", password="password")
+
+        self.project = Project.objects.create(owner=self.owner, title="Distributed OS Research")
+        ProjectMember.objects.create(project=self.project, user=self.editor, role=ProjectMember.ROLE_EDITOR)
+        ProjectMember.objects.create(project=self.project, user=self.viewer, role=ProjectMember.ROLE_VIEWER)
+
+        self.other_project = Project.objects.create(owner=self.other_user, title="Quantum Computing")
+
+        # Papers in session project
+        self.paper1 = Paper.objects.create(project=self.project, title="Mod 1: Kernel Architecture")
+        self.paper2 = Paper.objects.create(project=self.project, title="Mod 2: Distributed Scheduling")
+        self.paper3 = Paper.objects.create(project=self.project, title="Mod 3: Real-Time Systems")
+
+        # Unattached paper in same project
+        self.paper_unattached = Paper.objects.create(project=self.project, title="Mod 4: Unattached Paper")
+
+        # Cross-project paper
+        self.paper_foreign = Paper.objects.create(project=self.other_project, title="Foreign Paper")
+
+        # Create PaperChunks with embeddings
+        self.chunk1 = PaperChunk.objects.create(
+            paper=self.paper1,
+            text="Kernel architecture provides process abstraction and virtual memory.",
+            page_number=11,
+            chunk_index=0,
+            embedding=[0.5] * 384,
+        )
+        self.chunk2 = PaperChunk.objects.create(
+            paper=self.paper2,
+            text="Distributed scheduling balances workload across heterogeneous clusters.",
+            page_number=24,
+            chunk_index=0,
+            embedding=[0.5] * 384,
+        )
+        self.chunk3 = PaperChunk.objects.create(
+            paper=self.paper3,
+            text="Real-time systems enforce strict latency bounds and rate-monotonic scheduling.",
+            page_number=8,
+            chunk_index=0,
+            embedding=[0.5] * 384,
+        )
+        self.chunk_unattached = PaperChunk.objects.create(
+            paper=self.paper_unattached,
+            text="Unattached paper details on network protocols.",
+            page_number=5,
+            chunk_index=0,
+            embedding=[0.5] * 384,
+        )
+        self.chunk_foreign = PaperChunk.objects.create(
+            paper=self.paper_foreign,
+            text="Quantum gates and error correction codes.",
+            page_number=3,
+            chunk_index=0,
+            embedding=[0.5] * 384,
+        )
+
+        # Research sessions
+        self.session = ResearchSession.objects.create(
+            project=self.project,
+            title="Multi-Paper Research Session",
+        )
+        self.session.papers.set([self.paper1, self.paper2, self.paper3])
+
+        self.empty_session = ResearchSession.objects.create(
+            project=self.project,
+            title="Empty Session Without Papers",
+        )
+
+        self.client = APIClient()
+
+        # Mock Gemini response object
+        self.mock_gemini = MagicMock()
+        self.mock_gemini.text = "Across the papers, process scheduling is described as balancing workload and enforcing latency bounds."
+
+    def test_01_authenticated_user_can_ask_using_session_papers(self):
+        """1. Authenticated user can ask using session papers via POST /api/ai/research-ask/."""
+        self.client.force_authenticate(user=self.owner)
+        with patch("ai.services._call_gemini", return_value=self.mock_gemini), \
+             patch("ai.services.generate_embedding", return_value=[0.5] * 384), \
+             patch("os.getenv", return_value="test-api-key"):
+            response = self.client.post("/api/ai/research-ask/", {
+                "question": "What are the common approaches to process scheduling?",
+                "session_id": self.session.id,
+            }, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("answer", data)
+        self.assertEqual(data["answer"], self.mock_gemini.text)
+        self.assertIn("sources", data)
+        self.assertTrue(len(data["sources"]) >= 1)
+        self.assertEqual(data["session_id"], self.session.id)
+        self.assertIn("citation_map", data)
+
+    def test_02_answer_retrieves_evidence_from_multiple_papers(self):
+        """2. Retrieval gathers evidence from multiple papers in session."""
+        from ai.services import retrieve_session_evidence
+        with patch("ai.services.generate_embedding", return_value=[0.5] * 384):
+            groups = retrieve_session_evidence(
+                "scheduling methods",
+                [self.paper1, self.paper2, self.paper3],
+            )
+
+        self.assertEqual(len(groups), 3)
+        retrieved_paper_ids = {g["paper_id"] for g in groups}
+        self.assertEqual(retrieved_paper_ids, {self.paper1.id, self.paper2.id, self.paper3.id})
+        for g in groups:
+            self.assertTrue(len(g["sources"]) >= 1)
+
+    def test_03_one_paper_may_contribute_evidence(self):
+        """3. One single paper session correctly returns evidence from that paper."""
+        single_paper_session = ResearchSession.objects.create(
+            project=self.project,
+            title="Single Paper Session",
+        )
+        single_paper_session.papers.set([self.paper1])
+
+        from ai.services import generate_research_answer
+        with patch("ai.services._call_gemini", return_value=self.mock_gemini), \
+             patch("ai.services.generate_embedding", return_value=[0.5] * 384), \
+             patch("os.getenv", return_value="test-api-key"):
+            result = generate_research_answer("What is kernel architecture?", single_paper_session)
+
+        self.assertIn("answer", result)
+        self.assertEqual(len(result["sources"]), 1)
+        self.assertEqual(result["sources"][0]["paper_id"], self.paper1.id)
+        self.assertEqual(result["sources"][0]["page_number"], 11)
+
+    def test_04_multiple_papers_may_contribute_evidence(self):
+        """4. Multiple papers contribute evidence to multi-paper answer."""
+        from ai.services import generate_research_answer
+        with patch("ai.services._call_gemini", return_value=self.mock_gemini), \
+             patch("ai.services.generate_embedding", return_value=[0.5] * 384), \
+             patch("os.getenv", return_value="test-api-key"):
+            result = generate_research_answer("Compare scheduling across papers", self.session)
+
+        source_paper_ids = {s["paper_id"] for s in result["sources"]}
+        self.assertIn(self.paper1.id, source_paper_ids)
+        self.assertIn(self.paper2.id, source_paper_ids)
+        self.assertIn(self.paper3.id, source_paper_ids)
+
+    def test_05_paper_outside_session_cannot_be_used(self):
+        """5. Papers outside the session are never included in evidence."""
+        self.client.force_authenticate(user=self.owner)
+        with patch("ai.services._call_gemini", return_value=self.mock_gemini), \
+             patch("ai.services.generate_embedding", return_value=[0.5] * 384), \
+             patch("os.getenv", return_value="test-api-key"):
+            response = self.client.post("/api/ai/research-ask/", {
+                "question": "Tell me about protocols and scheduling",
+                "session_id": self.session.id,
+            }, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        for src in data.get("sources", []):
+            self.assertNotEqual(src["paper_id"], self.paper_unattached.id)
+            self.assertNotEqual(src["chunk_id"], self.chunk_unattached.id)
+
+    def test_06_cross_project_papers_rejected(self):
+        """6. Cross-project papers attached to session are strictly rejected with HTTP 400."""
+        # Attach a paper belonging to other_project to this session
+        self.session.papers.add(self.paper_foreign)
+
+        self.client.force_authenticate(user=self.owner)
+        response = self.client.post("/api/ai/research-ask/", {
+            "question": "Cross-project inquiry",
+            "session_id": self.session.id,
+        }, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("does not belong to the session project", response.json().get("error", ""))
+
+    def test_07_viewer_cannot_generate(self):
+        """7. Viewer receives HTTP 403 and cannot generate questions."""
+        self.client.force_authenticate(user=self.viewer)
+        with patch("ai.services._call_gemini") as mock_gemini_call:
+            response = self.client.post("/api/ai/research-ask/", {
+                "question": "Can viewer ask question?",
+                "session_id": self.session.id,
+            }, format="json")
+
+            self.assertEqual(response.status_code, 403)
+            mock_gemini_call.assert_not_called()
+
+    def test_08_editor_can_generate(self):
+        """8. Editor has write permission and receives HTTP 200."""
+        self.client.force_authenticate(user=self.editor)
+        with patch("ai.services._call_gemini", return_value=self.mock_gemini), \
+             patch("ai.services.generate_embedding", return_value=[0.5] * 384), \
+             patch("os.getenv", return_value="test-api-key"):
+            response = self.client.post("/api/ai/research-ask/", {
+                "question": "Editor asks research question",
+                "session_id": self.session.id,
+            }, format="json")
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_09_owner_can_generate(self):
+        """9. Owner has full permission and receives HTTP 200."""
+        self.client.force_authenticate(user=self.owner)
+        with patch("ai.services._call_gemini", return_value=self.mock_gemini), \
+             patch("ai.services.generate_embedding", return_value=[0.5] * 384), \
+             patch("os.getenv", return_value="test-api-key"):
+            response = self.client.post("/api/ai/research-ask/", {
+                "question": "Owner asks research question",
+                "session_id": self.session.id,
+            }, format="json")
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_10_missing_session_rejected(self):
+        """10. Non-existent session returns HTTP 404."""
+        self.client.force_authenticate(user=self.owner)
+        response = self.client.post("/api/ai/research-ask/", {
+            "question": "What is an OS?",
+            "session_id": 999999,
+        }, format="json")
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_11_session_with_no_papers_handled(self):
+        """11. Session with zero papers returns HTTP 400 with helpful message."""
+        self.client.force_authenticate(user=self.owner)
+        response = self.client.post("/api/ai/research-ask/", {
+            "question": "What is an OS?",
+            "session_id": self.empty_session.id,
+        }, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json().get("error"),
+            "Add research papers to this session to start asking questions."
+        )
+
+    def test_12_persistence_creates_user_assistant_and_research_evidence(self):
+        """12. Persistence creates USER + ASSISTANT messages and ResearchEvidence rows."""
+        initial_msg_count = ResearchMessage.objects.filter(session=self.session).count()
+        initial_ev_count = ResearchEvidence.objects.filter(message__session=self.session).count()
+
+        self.client.force_authenticate(user=self.owner)
+        with patch("ai.services._call_gemini", return_value=self.mock_gemini), \
+             patch("ai.services.generate_embedding", return_value=[0.5] * 384), \
+             patch("os.getenv", return_value="test-api-key"):
+            response = self.client.post("/api/ai/research-ask/", {
+                "question": "Explain system architecture across all papers",
+                "session_id": self.session.id,
+            }, format="json")
+
+        self.assertEqual(response.status_code, 200)
+
+        # Check messages persisted
+        messages = ResearchMessage.objects.filter(session=self.session).order_by("created_at")
+        self.assertEqual(messages.count(), initial_msg_count + 2)
+
+        user_msg = messages[initial_msg_count]
+        assistant_msg = messages[initial_msg_count + 1]
+
+        self.assertEqual(user_msg.role, ResearchMessage.ROLE_USER)
+        self.assertEqual(user_msg.content, "Explain system architecture across all papers")
+
+        self.assertEqual(assistant_msg.role, ResearchMessage.ROLE_ASSISTANT)
+        self.assertEqual(assistant_msg.content, self.mock_gemini.text)
+
+        # Check evidence persisted
+        new_evidences = ResearchEvidence.objects.filter(message=assistant_msg)
+        self.assertTrue(new_evidences.count() >= 1)
+        for ev in new_evidences:
+            self.assertIn(ev.paper, [self.paper1, self.paper2, self.paper3])
+            self.assertIsNotNone(ev.chunk)
+            self.assertTrue(len(ev.text) > 0)
+
+    def test_13_citation_ids_resolve_correctly(self):
+        """13. Citation IDs and citation_map resolve properly for multiple papers."""
+        self.client.force_authenticate(user=self.owner)
+        with patch("ai.services._call_gemini", return_value=self.mock_gemini), \
+             patch("ai.services.generate_embedding", return_value=[0.5] * 384), \
+             patch("os.getenv", return_value="test-api-key"):
+            response = self.client.post("/api/ai/research-ask/", {
+                "question": "Multi-paper citation resolution test",
+                "session_id": self.session.id,
+            }, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        sources = data.get("sources", [])
+        citation_map = data.get("citation_map", {})
+
+        self.assertTrue(len(sources) >= 1)
+        self.assertTrue(len(citation_map) >= 1)
+
+        for src in sources:
+            self.assertTrue(src["citation_id"].startswith(f"cite_p{src['paper_id']}_c"))
+            self.assertIn("citation_number", src)
+            self.assertIn("citation_label", src)
+            num_key = str(src["citation_number"])
+            self.assertIn(num_key, citation_map)
+            map_entry = citation_map[num_key]
+            self.assertEqual(map_entry["citation_id"], src["citation_id"])
+            self.assertEqual(map_entry["paper_id"], src["paper_id"])
+            self.assertEqual(map_entry["chunk_id"], src["chunk_id"])
+            self.assertIsNotNone(map_entry["evidence_id"])
+
+    def test_14_no_gemini_call_for_unauthorized_requests(self):
+        """14. Unauthorized and unauthenticated requests never call Gemini."""
+        # A. Unauthenticated request
+        with patch("ai.services._call_gemini") as mock_gemini_call:
+            response = self.client.post("/api/ai/research-ask/", {
+                "question": "Unauthenticated query",
+                "session_id": self.session.id,
+            }, format="json")
+            self.assertEqual(response.status_code, 401)
+            mock_gemini_call.assert_not_called()
+
+        # B. Unrelated user (not a member of project)
+        self.client.force_authenticate(user=self.other_user)
+        with patch("ai.services._call_gemini") as mock_gemini_call:
+            response = self.client.post("/api/ai/research-ask/", {
+                "question": "Unrelated user query",
+                "session_id": self.session.id,
+            }, format="json")
+            self.assertEqual(response.status_code, 403)
+            mock_gemini_call.assert_not_called()
+
 
 
 
