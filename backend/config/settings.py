@@ -46,7 +46,7 @@ _local_lan_ip = _detect_lan_ip()
 
 # Allowed hosts configured via environment variable (comma-separated), with sensible localhost defaults
 raw_allowed_hosts = os.environ.get('ALLOWED_HOSTS', '')
-base_hosts = ["localhost", "127.0.0.1", "0.0.0.0"]
+base_hosts = ["localhost", "127.0.0.1", "0.0.0.0", "*"]
 if _local_lan_ip:
     base_hosts.append(_local_lan_ip)
 
@@ -195,6 +195,13 @@ if cors_env:
     CORS_ALLOWED_ORIGINS = list(dict.fromkeys(default_cors_origins + parsed_origins))
 else:
     CORS_ALLOWED_ORIGINS = default_cors_origins
+
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^http://localhost(:\d+)?$",
+    r"^http://127\.0\.0\.1(:\d+)?$",
+    r"^http://10\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?$",
+    r"^http://192\.168\.\d{1,3}\.\d{1,3}(:\d+)?$",
+]
 
 
 # Default primary key field type
