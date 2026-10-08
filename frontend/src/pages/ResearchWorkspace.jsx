@@ -10,8 +10,8 @@ import { getProjectMembers, determineUserRole } from '../services/collaboration'
 import './ResearchWorkspace.css';
 
 /**
- * Helper to safely parse and detect structured multi-paper comparison JSON.
- * Accepts both parsed object and JSON string, and enriches evidence paper titles.
+ * Helper to safely parse and detect structured multi-paper comparison JSON for historical messages.
+ * Enriches evidence paper titles.
  */
 function parseStructuredComparison(content, papers = []) {
     let parsed = null;
@@ -43,7 +43,6 @@ function parseStructuredComparison(content, papers = []) {
          Array.isArray(parsed.findings_comparison) ||
          Array.isArray(parsed.research_gaps))
     ) {
-        // Enrich paper titles on sources if paper mapping is available
         if (papers && papers.length > 0) {
             const paperMap = {};
             papers.forEach((p) => {
@@ -75,63 +74,7 @@ function parseStructuredComparison(content, papers = []) {
 }
 
 /**
- * Helper to generate a concise, safe auto-title from the user's first research question or comparison focus.
- */
-function generateAutoTitle(text) {
-    if (!text || typeof text !== 'string') return 'Research Session';
-    const cleaned = text.replace(/[\r\n\t]+/g, ' ').trim();
-    if (!cleaned) return 'Research Session';
-    if (cleaned.length <= 50) return cleaned;
-    return cleaned.slice(0, 47).trim() + '...';
-}
-
-/**
- * Helper to format session updated date/time.
- */
-function formatSessionTime(isoString) {
-    if (!isoString) return '';
-    try {
-        const date = new Date(isoString);
-        const now = new Date();
-        const isToday = date.toDateString() === now.toDateString();
-        if (isToday) {
-            return `Today, ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-        }
-        return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-    } catch {
-        return '';
-    }
-}
-
-/**
- * Research prompt shortcuts for Multi-Paper session research.
- */
-const SESSION_RESEARCH_SHORTCUTS = [
-    {
-        label: 'Summarize the research',
-        prompt: 'Summarize the research and synthesize the main contributions across these papers.'
-    },
-    {
-        label: 'Explain the methodologies',
-        prompt: 'Explain the methodologies used across these papers, comparing their approaches, data, and evaluation techniques.'
-    },
-    {
-        label: 'Identify key findings',
-        prompt: 'Identify and synthesize the key findings and results across these papers.'
-    },
-    {
-        label: 'Identify limitations',
-        prompt: 'Identify the main limitations and caveats evident across these papers.'
-    },
-    {
-        label: 'Suggest future directions',
-        prompt: 'Suggest possible future research directions based on the collective findings and limitations across these papers.'
-    }
-];
-
-/**
- * Helper to safely parse and detect structured multi-paper research gap analysis JSON.
- * Accepts both parsed object and JSON string, and enriches evidence paper titles.
+ * Helper to safely parse and detect structured multi-paper research gap analysis JSON for historical messages.
  */
 function parseStructuredGapAnalysis(content, papers = []) {
     let parsed = null;
@@ -165,7 +108,6 @@ function parseStructuredGapAnalysis(content, papers = []) {
          Array.isArray(parsed.unanswered_research_questions) ||
          Array.isArray(parsed.future_research_directions))
     ) {
-        // Enrich paper titles on sources if paper mapping is available
         if (papers && papers.length > 0) {
             const paperMap = {};
             papers.forEach((p) => {
@@ -199,71 +141,7 @@ function parseStructuredGapAnalysis(content, papers = []) {
 }
 
 /**
- * Research prompt shortcuts for Multi-Paper comparison.
- */
-const COMPARISON_SHORTCUTS = [
-    {
-        label: 'Compare methodology',
-        prompt: 'Compare the methodology and study design used across these papers.'
-    },
-    {
-        label: 'Compare key findings',
-        prompt: 'Compare the key findings and results across these papers.'
-    },
-    {
-        label: 'Compare limitations',
-        prompt: 'Compare the limitations identified in these papers.'
-    },
-    // Temporarily hidden: Research Gap shortcut button
-    // {
-    //     label: 'Compare research gaps',
-    //     prompt: 'Compare the research gaps identified or implied by these papers.'
-    // },
-    {
-        label: 'Compare study design',
-        prompt: 'Compare the study designs, datasets, and evaluation approaches used in these papers.'
-    },
-    {
-        label: 'Give an overall comparison',
-        prompt: 'Provide an overall comparison of the selected papers, including similarities, differences, methodology, findings, limitations, and research gaps.'
-    }
-];
-
-/**
- * Research prompt shortcuts for Multi-Paper Research Gap Analysis.
- */
-const RESEARCH_GAP_SHORTCUTS = [
-    {
-        label: 'Find research gaps',
-        prompt: 'Identify the major research gaps across these papers.'
-    },
-    {
-        label: 'Identify methodological gaps',
-        prompt: 'Identify the methodological gaps and study limitations across these papers.'
-    },
-    {
-        label: 'Find dataset/population gaps',
-        prompt: 'Identify dataset, sample size, or population gaps across these papers.'
-    },
-    {
-        label: 'Identify contradictions',
-        prompt: 'Identify contradictions or inconsistent findings across these papers.'
-    },
-    {
-        label: 'Find unanswered research questions',
-        prompt: 'Identify unanswered research questions and unexplored areas across these papers.'
-    },
-    {
-        label: 'Suggest future research directions',
-        prompt: 'Suggest promising future research directions based on the collective gaps of these papers.'
-    }
-];
-
-const DEFAULT_GAP_QUESTION = 'Identify the major research gaps, limitations, unanswered questions, and future research directions across these papers.';
-
-/**
- * Helper to safely parse and detect structured cross-paper thematic analysis JSON.
- * Accepts both parsed object and JSON string, and enriches evidence paper titles.
+ * Helper to safely parse and detect structured cross-paper thematic analysis JSON for historical messages.
  */
 function parseStructuredThematicAnalysis(content, papers = []) {
     let parsed = null;
@@ -290,7 +168,6 @@ function parseStructuredThematicAnalysis(content, papers = []) {
         typeof parsed === 'object' &&
         (parsed.overall_synthesis || Array.isArray(parsed.themes))
     ) {
-        // Enrich paper titles on sources if paper mapping is available
         if (papers && papers.length > 0) {
             const paperMap = {};
             papers.forEach((p) => {
@@ -332,40 +209,7 @@ function parseStructuredThematicAnalysis(content, papers = []) {
 }
 
 /**
- * Research prompt shortcuts for Cross-Paper Thematic Analysis.
- */
-const THEMATIC_SHORTCUTS = [
-    {
-        label: 'Identify major themes',
-        prompt: 'Identify the major overarching themes and conceptual frameworks across these papers.'
-    },
-    {
-        label: 'Find recurring concepts',
-        prompt: 'Find the recurring concepts, core definitions, and shared theoretical notions across these papers.'
-    },
-    {
-        label: 'Compare common themes',
-        prompt: 'Compare how each paper addresses the common themes and shared research questions.'
-    },
-    {
-        label: 'Find differences in themes',
-        prompt: 'Identify the divergent themes, differing perspectives, and contrasting viewpoints across these papers.'
-    },
-    {
-        label: 'Identify emerging themes',
-        prompt: 'Identify emerging themes, novel techniques, and innovative directions introduced across these papers.'
-    },
-    {
-        label: 'Summarize cross-paper patterns',
-        prompt: 'Summarize key cross-paper patterns, shared methodologies, and synthesized findings across these papers.'
-    }
-];
-
-const DEFAULT_THEMATIC_QUESTION = 'Identify the major themes, recurring concepts, and important cross-paper patterns across these papers.';
-
-/**
- * Helper to safely parse and detect structured cross-paper research trend analysis JSON.
- * Accepts both parsed object and JSON string, and enriches evidence paper titles.
+ * Helper to safely parse and detect structured cross-paper research trend analysis JSON for historical messages.
  */
 function parseStructuredTrendAnalysis(content, papers = []) {
     let parsed = null;
@@ -402,7 +246,6 @@ function parseStructuredTrendAnalysis(content, papers = []) {
                 paperMap[p.id] = p.title;
             });
 
-            // 1. research_evolution
             if (Array.isArray(parsed.research_evolution)) {
                 parsed.research_evolution.forEach((ev) => {
                     if (ev && Array.isArray(ev.papers)) {
@@ -432,7 +275,6 @@ function parseStructuredTrendAnalysis(content, papers = []) {
                 });
             }
 
-            // 2. other sections: emerging_directions, methodology_evolution, future_directions
             const otherSections = [
                 parsed.emerging_directions,
                 parsed.methodology_evolution,
@@ -458,36 +300,59 @@ function parseStructuredTrendAnalysis(content, papers = []) {
 }
 
 /**
- * Research prompt shortcuts for Cross-Paper Research Trend Analysis.
+ * Helper to generate a concise, safe auto-title from the user's first research question.
  */
-const TREND_SHORTCUTS = [
+function generateAutoTitle(text) {
+    if (!text || typeof text !== 'string') return 'Research Session';
+    const cleaned = text.replace(/[\r\n\t]+/g, ' ').trim();
+    if (!cleaned) return 'Research Session';
+    if (cleaned.length <= 50) return cleaned;
+    return cleaned.slice(0, 47).trim() + '...';
+}
+
+/**
+ * Helper to format session updated date/time.
+ */
+function formatSessionTime(isoString) {
+    if (!isoString) return '';
+    try {
+        const date = new Date(isoString);
+        const now = new Date();
+        const isToday = date.toDateString() === now.toDateString();
+        if (isToday) {
+            return `Today, ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+        }
+        return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    } catch {
+        return '';
+    }
+}
+
+/**
+ * Research prompt shortcuts for Multi-Paper session research.
+ */
+const SESSION_RESEARCH_SHORTCUTS = [
     {
-        label: 'Analyze research evolution',
-        prompt: 'Analyze how the research problem, techniques, and core focus have evolved across these papers.'
+        label: 'Summarize the research',
+        prompt: 'Summarize the research and synthesize the main contributions across these papers.'
     },
     {
-        label: 'Compare methodologies',
-        prompt: 'Compare how methodologies, experimental approaches, and technical frameworks evolve across these papers.'
+        label: 'Explain methodologies',
+        prompt: 'Explain the methodologies used across these papers, comparing their approaches, data, and evaluation techniques.'
     },
     {
-        label: 'Identify emerging directions',
-        prompt: 'Identify emerging research directions, newly explored paradigms, and novel topics across these papers.'
+        label: 'Identify key findings',
+        prompt: 'Identify and synthesize the key findings and results across these papers.'
     },
     {
-        label: 'Find changes in research focus',
-        prompt: 'Identify shifts and changes in research focus, assumptions, and priorities across these papers.'
+        label: 'Identify limitations',
+        prompt: 'Identify the main limitations and caveats evident across these papers.'
     },
     {
-        label: 'Analyze methodological trends',
-        prompt: 'Analyze key methodological trends, procedural shifts, and evaluation strategies across these papers.'
-    },
-    {
-        label: 'Suggest future research directions',
-        prompt: 'Suggest concrete, grounded future research directions based on the evolutionary trajectory of these papers.'
+        label: 'Suggest future directions',
+        prompt: 'Suggest possible future research directions based on the collective findings and limitations across these papers.'
     }
 ];
-
-const DEFAULT_TREND_QUESTION = 'Analyze how research has evolved across these papers, including changes in methods, approaches, research focus, emerging directions, and future research.';
 
 function ResearchWorkspace() {
     const { projectId } = useParams();
@@ -507,37 +372,10 @@ function ResearchWorkspace() {
     const [savingPapers, setSavingPapers] = useState(false);
     const [removingPaperId, setRemovingPaperId] = useState(null);
 
-    // Chat Mode: 'ask' (multi-paper session chat) or 'compare' (multi-paper comparison)
-    const [chatMode, setChatMode] = useState('ask');
-
-    // Live Multi-Paper Session Ask Question State
+    // Live Multi-Paper Session Research Chat State
     const [questionText, setQuestionText] = useState('');
     const [loadingAsk, setLoadingAsk] = useState(false);
     const [askError, setAskError] = useState('');
-
-    // Live Multi-Paper Comparison State
-    const [selectedComparisonPaperIds, setSelectedComparisonPaperIds] = useState([]);
-    const [comparisonQuestion, setComparisonQuestion] = useState('');
-    const [loadingCompare, setLoadingCompare] = useState(false);
-    const [compareError, setCompareError] = useState('');
-
-    // Live Multi-Paper Research Gap Analysis State
-    const [selectedGapPaperIds, setSelectedGapPaperIds] = useState([]);
-    const [gapQuestion, setGapQuestion] = useState('');
-    const [loadingGap, setLoadingGap] = useState(false);
-    const [gapError, setGapError] = useState('');
-
-    // Live Multi-Paper Thematic Analysis State
-    const [selectedThematicPaperIds, setSelectedThematicPaperIds] = useState([]);
-    const [thematicQuestion, setThematicQuestion] = useState('');
-    const [loadingThematic, setLoadingThematic] = useState(false);
-    const [thematicError, setThematicError] = useState('');
-
-    // Live Multi-Paper Research Trend Analysis State
-    const [selectedTrendPaperIds, setSelectedTrendPaperIds] = useState([]);
-    const [trendQuestion, setTrendQuestion] = useState('');
-    const [loadingTrend, setLoadingTrend] = useState(false);
-    const [trendError, setTrendError] = useState('');
 
     // Loading & Action states
     const [userRole, setUserRole] = useState("VIEWER");
@@ -597,7 +435,7 @@ function ResearchWorkspace() {
         if (!chatScrollRef.current) return;
         const { scrollTop, scrollHeight, clientHeight } = chatScrollRef.current;
         const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
-        const nearBottom = distanceFromBottom <= 100;
+        const nearBottom = distanceFromBottom <= 120;
         setIsNearBottom(nearBottom);
         isNearBottomRef.current = nearBottom;
     }, []);
@@ -620,7 +458,6 @@ function ResearchWorkspace() {
                     }
                 };
 
-                // Run immediately in next animation frame and follow up on post-paint ticks
                 requestAnimationFrame(scrollToEnd);
                 const timer1 = setTimeout(scrollToEnd, 60);
                 const timer2 = setTimeout(scrollToEnd, 180);
@@ -645,55 +482,30 @@ function ResearchWorkspace() {
 
     // Ensure analyzing banner is visible when user sends a question
     useEffect(() => {
-        const isAnalyzing = loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend;
-        if (isAnalyzing && chatScrollRef.current) {
+        if (loadingAsk && chatScrollRef.current) {
             scrollToBottom(true);
         }
-    }, [loadingAsk, loadingCompare, loadingGap, loadingThematic, loadingTrend, scrollToBottom]);
+    }, [loadingAsk, scrollToBottom]);
 
-    // Select and open an existing session (0 Gemini calls) with race condition protection
+    // Select and open an existing session
     const handleSelectSession = useCallback(async (sessionId) => {
         currentSelectIdRef.current = sessionId;
         setIsMobileSidebarOpen(false);
         try {
             setActiveSessionId(sessionId);
-            setActiveSession(null); // Clear previous session messages immediately so Session A does not linger
+            setActiveSession(null);
             lastScrolledSessionIdRef.current = null;
             setLoadingSession(true);
             setSessionError('');
             setAskError('');
             setQuestionText('');
-            setCompareError('');
-            setComparisonQuestion('');
-            setGapError('');
-            setGapQuestion('');
-            setThematicError('');
-            setThematicQuestion('');
-            setTrendError('');
-            setTrendQuestion('');
-            setChatMode('ask');
 
             const res = await api.get(`/ai/sessions/${sessionId}/`);
 
-            // Discard stale responses if user clicked another session while this request was in flight
             if (currentSelectIdRef.current !== sessionId) return;
 
             const sessionData = res.data;
             setActiveSession(sessionData);
-
-            // Initialize comparison, gap, thematic, and trend selections from session papers
-            if (sessionData.papers && sessionData.papers.length > 0) {
-                const compPaperIds = sessionData.papers.slice(0, 4).map((p) => p.id);
-                setSelectedComparisonPaperIds(compPaperIds);
-                setSelectedGapPaperIds(compPaperIds);
-                setSelectedThematicPaperIds(compPaperIds);
-                setSelectedTrendPaperIds(compPaperIds);
-            } else {
-                setSelectedComparisonPaperIds([]);
-                setSelectedGapPaperIds([]);
-                setSelectedThematicPaperIds([]);
-                setSelectedTrendPaperIds([]);
-            }
         } catch (err) {
             if (currentSelectIdRef.current !== sessionId) return;
             if (err.response?.status === 401) {
@@ -721,7 +533,6 @@ function ResearchWorkspace() {
                 setLoadingList(true);
                 setListError('');
 
-                // 1. Fetch project meta for breadcrumb and role determination
                 try {
                     const projRes = await api.get(`/projects/${projectId}/`);
                     const projData = projRes.data;
@@ -742,7 +553,6 @@ function ResearchWorkspace() {
                     // Non-fatal
                 }
 
-                // 2. Fetch project papers for paper selection
                 try {
                     const papersRes = await api.get(`/projects/${projectId}/papers/`);
                     setProjectPapers(papersRes.data || []);
@@ -750,12 +560,10 @@ function ResearchWorkspace() {
                     // Non-fatal
                 }
 
-                // 3. Fetch research sessions
                 const sessRes = await api.get(`/ai/sessions/?project_id=${projectId}`);
                 const fetchedSessions = sessRes.data || [];
                 setSessions(fetchedSessions);
 
-                // If sessions exist, auto-open the most recently updated session
                 if (fetchedSessions.length > 0) {
                     handleSelectSession(fetchedSessions[0].id);
                 }
@@ -784,7 +592,7 @@ function ResearchWorkspace() {
         return () => window.removeEventListener('click', handleGlobalClick);
     }, []);
 
-    // Create a new session (0 Gemini calls)
+    // Create a new session
     const handleCreateSession = async () => {
         if (creatingSession || isViewer) return;
         setIsMobileSidebarOpen(false);
@@ -805,21 +613,8 @@ function ResearchWorkspace() {
                 ...newSession,
                 messages: []
             });
-            setSelectedComparisonPaperIds([]);
-            setSelectedGapPaperIds([]);
-            setSelectedThematicPaperIds([]);
-            setSelectedTrendPaperIds([]);
             setQuestionText('');
-            setComparisonQuestion('');
-            setGapQuestion('');
-            setThematicQuestion('');
-            setTrendQuestion('');
             setAskError('');
-            setCompareError('');
-            setGapError('');
-            setThematicError('');
-            setTrendError('');
-            setChatMode('ask');
         } catch (err) {
             setActionError(err.response?.data?.error || 'Failed to create research session.');
         } finally {
@@ -952,49 +747,6 @@ function ResearchWorkspace() {
                 updated_at: updated.updated_at
             }));
 
-            // Keep comparison selection in sync with updated papers
-            setSelectedComparisonPaperIds((prev) => {
-                const validIds = prev.filter((id) => selectedModalPaperIds.includes(id));
-                if (validIds.length < 2 && selectedModalPaperIds.length >= 2) {
-                    return selectedModalPaperIds.slice(0, 4);
-                }
-                return validIds.slice(0, 4);
-            });
-
-            // Keep gap selection in sync with updated papers
-            setSelectedGapPaperIds((prev) => {
-                const validIds = prev.filter((id) => selectedModalPaperIds.includes(id));
-                if (validIds.length < 2 && selectedModalPaperIds.length >= 2) {
-                    return selectedModalPaperIds.slice(0, 4);
-                }
-                return validIds.slice(0, 4);
-            });
-
-            // Keep thematic selection in sync with updated papers
-            setSelectedThematicPaperIds((prev) => {
-                const validIds = prev.filter((id) => selectedModalPaperIds.includes(id));
-                if (validIds.length < 2 && selectedModalPaperIds.length >= 2) {
-                    return selectedModalPaperIds.slice(0, 4);
-                }
-                return validIds.slice(0, 4);
-            });
-
-            // Keep trend selection in sync with updated papers
-            setSelectedTrendPaperIds((prev) => {
-                const validIds = prev.filter((id) => selectedModalPaperIds.includes(id));
-                if (validIds.length < 2 && selectedModalPaperIds.length >= 2) {
-                    return selectedModalPaperIds.slice(0, 4);
-                }
-                return validIds.slice(0, 4);
-            });
-
-            // If papers fall below 2, revert chatMode to 'ask'
-            if ((updated.papers?.length || 0) < 2) {
-                if (chatMode === 'compare' || chatMode === 'gap' || chatMode === 'thematic' || chatMode === 'trends') {
-                    setChatMode('ask');
-                }
-            }
-
             setSessions((prev) =>
                 prev.map((s) => (s.id === activeSessionId ? { ...s, papers: updated.papers, updated_at: updated.updated_at } : s))
             );
@@ -1026,19 +778,6 @@ function ResearchWorkspace() {
                 updated_at: updated.updated_at
             }));
 
-
-
-            setSelectedComparisonPaperIds((prev) => prev.filter((id) => id !== paperIdToRemove));
-            setSelectedGapPaperIds((prev) => prev.filter((id) => id !== paperIdToRemove));
-            setSelectedThematicPaperIds((prev) => prev.filter((id) => id !== paperIdToRemove));
-            setSelectedTrendPaperIds((prev) => prev.filter((id) => id !== paperIdToRemove));
-
-            if ((updated.papers?.length || 0) < 2) {
-                if (chatMode === 'compare' || chatMode === 'gap' || chatMode === 'thematic' || chatMode === 'trends') {
-                    setChatMode('ask');
-                }
-            }
-
             setSessions((prev) =>
                 prev.map((s) => (s.id === activeSessionId ? { ...s, papers: updated.papers, updated_at: updated.updated_at } : s))
             );
@@ -1049,61 +788,9 @@ function ResearchWorkspace() {
         }
     };
 
-    // Toggle Paper Selection for Multi-Paper Comparison (enforce min 2, max 4)
-    const handleToggleComparisonPaper = (paperId) => {
-        setSelectedComparisonPaperIds((prev) => {
-            if (prev.includes(paperId)) {
-                return prev.filter((id) => id !== paperId);
-            }
-            if (prev.length >= 4) {
-                return prev; // Maximum 4 papers strictly enforced
-            }
-            return [...prev, paperId];
-        });
-    };
-
-    // Toggle Paper Selection for Research Gap Analysis (enforce min 2, max 4)
-    const handleToggleGapPaper = (paperId) => {
-        setSelectedGapPaperIds((prev) => {
-            if (prev.includes(paperId)) {
-                return prev.filter((id) => id !== paperId);
-            }
-            if (prev.length >= 4) {
-                return prev; // Maximum 4 papers strictly enforced
-            }
-            return [...prev, paperId];
-        });
-    };
-
-    // Toggle Paper Selection for Thematic Analysis (enforce min 2, max 4)
-    const handleToggleThematicPaper = (paperId) => {
-        setSelectedThematicPaperIds((prev) => {
-            if (prev.includes(paperId)) {
-                return prev.filter((id) => id !== paperId);
-            }
-            if (prev.length >= 4) {
-                return prev; // Maximum 4 papers strictly enforced
-            }
-            return [...prev, paperId];
-        });
-    };
-
-    // Toggle Paper Selection for Research Trend Analysis (enforce min 2, max 4)
-    const handleToggleTrendPaper = (paperId) => {
-        setSelectedTrendPaperIds((prev) => {
-            if (prev.includes(paperId)) {
-                return prev.filter((id) => id !== paperId);
-            }
-            if (prev.length >= 4) {
-                return prev; // Maximum 4 papers strictly enforced
-            }
-            return [...prev, paperId];
-        });
-    };
-
     // Send Multi-Paper Research Question via POST /api/ai/research-ask/
     const handleSendQuestion = async () => {
-        if (isViewer || loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend) return;
+        if (isViewer || loadingAsk) return;
         const trimmed = questionText.trim();
         if (!trimmed) return;
         if (!activeSessionId) return;
@@ -1119,7 +806,7 @@ function ResearchWorkspace() {
 
             const data = await askResearchSession(trimmed, activeSessionId);
 
-            // Question sent successfully, clear the input
+            // Clear input on success
             setQuestionText('');
 
             const userMsg = {
@@ -1192,524 +879,7 @@ function ResearchWorkspace() {
         }
     };
 
-    // Send Multi-Paper Comparison via POST /api/ai/compare/
-    const handleGenerateComparison = async () => {
-        if (isViewer || loadingCompare || loadingAsk || loadingGap || loadingThematic || loadingTrend) return;
-
-        if (selectedComparisonPaperIds.length < 2 || selectedComparisonPaperIds.length > 4) {
-            setCompareError('Please select between 2 and 4 papers for comparison.');
-            return;
-        }
-
-        if (!activeSessionId) return;
-
-        const trimmed = comparisonQuestion.trim();
-        const displayQuestion = trimmed || 'Cross-Paper Comparison Synthesis';
-
-        try {
-            setLoadingCompare(true);
-            setCompareError('');
-
-            const res = await api.post('/ai/compare/', {
-                paper_ids: selectedComparisonPaperIds,
-                question: trimmed,
-                session_id: activeSessionId
-            });
-
-            // Comparison request succeeded, clear input
-            setComparisonQuestion('');
-
-            const comparisonData = res.data.comparison || {};
-
-            const userMsg = {
-                id: `user-${Date.now()}`,
-                role: 'USER',
-                content: displayQuestion,
-                created_at: new Date().toISOString()
-            };
-
-            const assistantMsg = {
-                id: `assistant-${Date.now()}`,
-                role: 'ASSISTANT',
-                content: comparisonData,
-                created_at: new Date().toISOString()
-            };
-
-            // Auto-title session if it has default generic title and this is the first message
-            const isDefaultTitle = activeSession?.title === 'Research Session' || activeSession?.title === 'New Research Session';
-            const isFirstMessage = (!activeSession?.messages || activeSession.messages.length === 0);
-            let nextCompTitle = activeSession?.title || 'Research Session';
-            if (isDefaultTitle && isFirstMessage) {
-                const autoTitle = generateAutoTitle(trimmed || 'Cross-Paper Comparison');
-                if (autoTitle && autoTitle !== nextCompTitle) {
-                    nextCompTitle = autoTitle;
-                    api.patch(`/ai/sessions/${activeSessionId}/`, { title: autoTitle }).catch((err) => {
-                        console.warn('Failed to auto-update session title:', err);
-                    });
-                }
-            }
-
-            setActiveSession((prev) => ({
-                ...prev,
-                title: nextCompTitle,
-                messages: [...(prev?.messages || []), userMsg, assistantMsg],
-                updated_at: new Date().toISOString()
-            }));
-
-            setSessions((prev) =>
-                prev.map((s) => (s.id === activeSessionId ? { ...s, title: nextCompTitle, updated_at: new Date().toISOString() } : s))
-            );
-
-            scrollToBottom();
-        } catch (err) {
-            if (err.response?.status === 400) {
-                setCompareError(err.response.data?.error || 'Please select between 2 and 4 papers.');
-            } else if (err.response?.status === 401) {
-                setCompareError('Authentication required.');
-            } else if (err.response?.status === 403) {
-                setCompareError('You do not have access to one or more selected papers or this session.');
-            } else if (err.response?.status === 404) {
-                setCompareError('Research session or papers not found.');
-            } else if (err.response?.status === 429) {
-                setCompareError('Gemini API rate limit exceeded. Please try again later.');
-            } else if (err.response?.status === 503) {
-                setCompareError('Gemini is temporarily unavailable. Please try again shortly.');
-            } else {
-                setCompareError(err.response?.data?.error || 'Network or server error. Please try again.');
-            }
-        } finally {
-            setLoadingCompare(false);
-        }
-    };
-
-    // Send Multi-Paper Research Gap Analysis via POST /api/ai/gap-analysis/
-    const handleGenerateGapAnalysis = async () => {
-        if (isViewer || loadingGap || loadingCompare || loadingAsk || loadingThematic || loadingTrend) return;
-
-        if (selectedGapPaperIds.length < 2 || selectedGapPaperIds.length > 4) {
-            setGapError('Please select between 2 and 4 papers for research gap analysis.');
-            return;
-        }
-
-        if (!activeSessionId) return;
-
-        const trimmed = gapQuestion.trim();
-        const effectiveQuestion = trimmed || DEFAULT_GAP_QUESTION;
-
-        try {
-            setLoadingGap(true);
-            setGapError('');
-
-            const res = await api.post('/ai/gap-analysis/', {
-                paper_ids: selectedGapPaperIds,
-                question: effectiveQuestion,
-                session_id: activeSessionId
-            });
-
-            // Clear input
-            setGapQuestion('');
-
-            const gapData = res.data.gap_analysis || {};
-
-            // Collect all unique sources from response across all categories
-            const paperMap = {};
-            (activeSession?.papers || []).forEach((p) => {
-                paperMap[p.id] = p.title;
-            });
-
-            const allSources = [];
-            const seenKeys = new Set();
-            const sections = [
-                gapData.common_limitations,
-                gapData.methodological_gaps,
-                gapData.dataset_population_gaps,
-                gapData.understudied_areas,
-                gapData.contradictions_inconsistencies,
-                gapData.unanswered_research_questions,
-                gapData.future_research_directions,
-            ];
-
-            sections.forEach((sec) => {
-                if (Array.isArray(sec)) {
-                    sec.forEach((item) => {
-                        if (item && Array.isArray(item.sources)) {
-                            item.sources.forEach((src) => {
-                                if (src) {
-                                    const key = src.chunk_id ? `${src.paper_id}-${src.chunk_id}` : `${src.paper_id}-${src.page_number}-${src.text}`;
-                                    if (!seenKeys.has(key)) {
-                                        seenKeys.add(key);
-                                        allSources.push({
-                                            id: src.chunk_id || `ev-gap-${Date.now()}-${allSources.length}`,
-                                            paper_id: src.paper_id,
-                                            paper_title: paperMap[src.paper_id] || src.paper_title || 'Paper',
-                                            chunk_id: src.chunk_id,
-                                            page_number: src.page_number,
-                                            text: src.text || ''
-                                        });
-                                    }
-                                }
-                            });
-                        }
-                    });
-                }
-            });
-
-            const userMsg = {
-                id: `user-${Date.now()}`,
-                role: 'USER',
-                content: effectiveQuestion,
-                created_at: new Date().toISOString()
-            };
-
-            const assistantMsg = {
-                id: `assistant-${Date.now()}`,
-                role: 'ASSISTANT',
-                content: gapData,
-                created_at: new Date().toISOString(),
-                evidence: allSources
-            };
-
-            // Auto-title session if default title
-            const isDefaultTitle = activeSession?.title === 'Research Session' || activeSession?.title === 'New Research Session';
-            const isFirstMessage = (!activeSession?.messages || activeSession.messages.length === 0);
-            let nextGapTitle = activeSession?.title || 'Research Session';
-            if (isDefaultTitle && isFirstMessage) {
-                const autoTitle = generateAutoTitle(effectiveQuestion);
-                if (autoTitle && autoTitle !== nextGapTitle) {
-                    nextGapTitle = autoTitle;
-                    api.patch(`/ai/sessions/${activeSessionId}/`, { title: autoTitle }).catch((err) => {
-                        console.warn('Failed to auto-update session title:', err);
-                    });
-                }
-            }
-
-            setActiveSession((prev) => ({
-                ...prev,
-                title: nextGapTitle,
-                messages: [...(prev?.messages || []), userMsg, assistantMsg],
-                updated_at: new Date().toISOString()
-            }));
-
-            setSessions((prev) =>
-                prev.map((s) => (s.id === activeSessionId ? { ...s, title: nextGapTitle, updated_at: new Date().toISOString() } : s))
-            );
-
-            scrollToBottom();
-        } catch (err) {
-            if (err.response?.status === 400) {
-                setGapError(err.response.data?.error || 'Please select between 2 and 4 papers.');
-            } else if (err.response?.status === 401) {
-                setGapError('Authentication required.');
-            } else if (err.response?.status === 403) {
-                setGapError('You do not have access to one or more selected papers or this session.');
-            } else if (err.response?.status === 404) {
-                setGapError('Research session or papers not found.');
-            } else if (err.response?.status === 429) {
-                setGapError('Gemini API rate limit exceeded. Please try again later.');
-            } else if (err.response?.status === 503) {
-                setGapError('Gemini is temporarily unavailable. Please try again shortly.');
-            } else {
-                setGapError(err.response?.data?.error || 'Network or server error. Please try again.');
-            }
-        } finally {
-            setLoadingGap(false);
-        }
-    };
-
-    // Send Multi-Paper Thematic Analysis via POST /api/ai/thematic-analysis/
-    const handleGenerateThematicAnalysis = async () => {
-        if (isViewer || loadingThematic || loadingGap || loadingCompare || loadingAsk || loadingTrend) return;
-
-        if (selectedThematicPaperIds.length < 2 || selectedThematicPaperIds.length > 4) {
-            setThematicError('Please select between 2 and 4 papers for thematic analysis.');
-            return;
-        }
-
-        if (!activeSessionId) return;
-
-        const trimmed = thematicQuestion.trim();
-        const effectiveQuestion = trimmed || DEFAULT_THEMATIC_QUESTION;
-
-        try {
-            setLoadingThematic(true);
-            setThematicError('');
-
-            const res = await api.post('/ai/thematic-analysis/', {
-                paper_ids: selectedThematicPaperIds,
-                question: effectiveQuestion,
-                session_id: activeSessionId
-            });
-
-            // Clear input
-            setThematicQuestion('');
-
-            const thematicData = res.data.thematic_analysis || {};
-
-            // Collect all unique sources from response across all themes
-            const paperMap = {};
-            (activeSession?.papers || []).forEach((p) => {
-                paperMap[p.id] = p.title;
-            });
-
-            const allSources = [];
-            const seenKeys = new Set();
-            const themes = thematicData.themes || [];
-            if (Array.isArray(themes)) {
-                themes.forEach((th) => {
-                    if (th && Array.isArray(th.papers)) {
-                        th.papers.forEach((pEntry) => {
-                            if (pEntry && Array.isArray(pEntry.sources)) {
-                                pEntry.sources.forEach((src) => {
-                                    if (src) {
-                                        const key = src.chunk_id
-                                            ? `${src.paper_id}-${src.chunk_id}`
-                                            : `${src.paper_id}-${src.page_number}-${src.text}`;
-                                        if (!seenKeys.has(key)) {
-                                            seenKeys.add(key);
-                                            allSources.push({
-                                                id: src.chunk_id || `ev-thematic-${Date.now()}-${allSources.length}`,
-                                                paper_id: src.paper_id,
-                                                paper_title: paperMap[src.paper_id] || pEntry.paper_title || src.paper_title || 'Paper',
-                                                chunk_id: src.chunk_id,
-                                                page_number: src.page_number,
-                                                text: src.text || ''
-                                            });
-                                        }
-                                    }
-                                });
-                            }
-                        });
-                    }
-                });
-            }
-
-            const userMsg = {
-                id: `user-${Date.now()}`,
-                role: 'USER',
-                content: effectiveQuestion,
-                created_at: new Date().toISOString()
-            };
-
-            const assistantMsg = {
-                id: `assistant-${Date.now()}`,
-                role: 'ASSISTANT',
-                content: thematicData,
-                created_at: new Date().toISOString(),
-                evidence: allSources
-            };
-
-            // Auto-title session if default title
-            const isDefaultTitle = activeSession?.title === 'Research Session' || activeSession?.title === 'New Research Session';
-            const isFirstMessage = (!activeSession?.messages || activeSession.messages.length === 0);
-            let nextThematicTitle = activeSession?.title || 'Research Session';
-            if (isDefaultTitle && isFirstMessage) {
-                const autoTitle = generateAutoTitle(effectiveQuestion);
-                if (autoTitle && autoTitle !== nextThematicTitle) {
-                    nextThematicTitle = autoTitle;
-                    api.patch(`/ai/sessions/${activeSessionId}/`, { title: autoTitle }).catch((err) => {
-                        console.warn('Failed to auto-update session title:', err);
-                    });
-                }
-            }
-
-            setActiveSession((prev) => ({
-                ...prev,
-                title: nextThematicTitle,
-                messages: [...(prev?.messages || []), userMsg, assistantMsg],
-                updated_at: new Date().toISOString()
-            }));
-
-            setSessions((prev) =>
-                prev.map((s) => (s.id === activeSessionId ? { ...s, title: nextThematicTitle, updated_at: new Date().toISOString() } : s))
-            );
-
-            scrollToBottom();
-        } catch (err) {
-            if (err.response?.status === 400) {
-                setThematicError(err.response.data?.error || 'Please select between 2 and 4 papers.');
-            } else if (err.response?.status === 401) {
-                setThematicError('Authentication required.');
-            } else if (err.response?.status === 403) {
-                setThematicError('You do not have access to one or more selected papers or this session.');
-            } else if (err.response?.status === 404) {
-                setThematicError('Research session or papers not found.');
-            } else if (err.response?.status === 429) {
-                setThematicError('Gemini API rate limit exceeded. Please try again later.');
-            } else if (err.response?.status === 503) {
-                setThematicError('Gemini is temporarily unavailable. Please try again shortly.');
-            } else {
-                setThematicError(err.response?.data?.error || 'Network or server error. Please try again.');
-            }
-        } finally {
-            setLoadingThematic(false);
-        }
-    };
-
-    // Send Multi-Paper Research Trend Analysis via POST /api/ai/research-trends/
-    const handleGenerateTrendAnalysis = async () => {
-        if (isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk) return;
-
-        if (selectedTrendPaperIds.length < 2 || selectedTrendPaperIds.length > 4) {
-            setTrendError('Please select between 2 and 4 papers for research trend analysis.');
-            return;
-        }
-
-        if (!activeSessionId) return;
-
-        const trimmed = trendQuestion.trim();
-        const effectiveQuestion = trimmed || DEFAULT_TREND_QUESTION;
-
-        try {
-            setLoadingTrend(true);
-            setTrendError('');
-
-            const res = await api.post('/ai/research-trends/', {
-                paper_ids: selectedTrendPaperIds,
-                question: effectiveQuestion,
-                session_id: activeSessionId
-            });
-
-            // Clear input on success
-            setTrendQuestion('');
-
-            const trendData = res.data.trend_analysis || {};
-
-            // Collect all unique sources from response across all sections
-            const paperMap = {};
-            (activeSession?.papers || []).forEach((p) => {
-                paperMap[p.id] = p.title;
-            });
-
-            const allSources = [];
-            const seenKeys = new Set();
-
-            // 1. research_evolution
-            const evolution = trendData.research_evolution || [];
-            if (Array.isArray(evolution)) {
-                evolution.forEach((ev) => {
-                    if (ev && Array.isArray(ev.papers)) {
-                        ev.papers.forEach((pEntry) => {
-                            if (pEntry && Array.isArray(pEntry.sources)) {
-                                pEntry.sources.forEach((src) => {
-                                    if (src) {
-                                        const key = src.chunk_id
-                                            ? `${src.paper_id}-${src.chunk_id}`
-                                            : `${src.paper_id}-${src.page_number}-${src.text}`;
-                                        if (!seenKeys.has(key)) {
-                                            seenKeys.add(key);
-                                            allSources.push({
-                                                id: src.chunk_id || `ev-trend-${Date.now()}-${allSources.length}`,
-                                                paper_id: src.paper_id,
-                                                paper_title: paperMap[src.paper_id] || pEntry.paper_title || src.paper_title || 'Paper',
-                                                chunk_id: src.chunk_id,
-                                                page_number: src.page_number,
-                                                text: src.text || ''
-                                            });
-                                        }
-                                    }
-                                });
-                            }
-                        });
-                    }
-                });
-            }
-
-            // 2. emerging_directions, methodology_evolution, future_directions
-            const otherSections = [
-                trendData.emerging_directions,
-                trendData.methodology_evolution,
-                trendData.future_directions
-            ];
-            otherSections.forEach((sectionList) => {
-                if (Array.isArray(sectionList)) {
-                    sectionList.forEach((item) => {
-                        if (item && Array.isArray(item.sources)) {
-                            item.sources.forEach((src) => {
-                                if (src) {
-                                    const key = src.chunk_id
-                                        ? `${src.paper_id}-${src.chunk_id}`
-                                        : `${src.paper_id}-${src.page_number}-${src.text}`;
-                                    if (!seenKeys.has(key)) {
-                                        seenKeys.add(key);
-                                        allSources.push({
-                                            id: src.chunk_id || `ev-trend-${Date.now()}-${allSources.length}`,
-                                            paper_id: src.paper_id,
-                                            paper_title: paperMap[src.paper_id] || src.paper_title || 'Paper',
-                                            chunk_id: src.chunk_id,
-                                            page_number: src.page_number,
-                                            text: src.text || ''
-                                        });
-                                    }
-                                }
-                            });
-                        }
-                    });
-                }
-            });
-
-            const userMsg = {
-                id: `user-${Date.now()}`,
-                role: 'USER',
-                content: effectiveQuestion,
-                created_at: new Date().toISOString()
-            };
-
-            const assistantMsg = {
-                id: `assistant-${Date.now()}`,
-                role: 'ASSISTANT',
-                content: trendData,
-                created_at: new Date().toISOString(),
-                evidence: allSources
-            };
-
-            // Auto-title session if default title
-            const isDefaultTitle = activeSession?.title === 'Research Session' || activeSession?.title === 'New Research Session';
-            const isFirstMessage = (!activeSession?.messages || activeSession.messages.length === 0);
-            let nextTrendTitle = activeSession?.title || 'Research Session';
-            if (isDefaultTitle && isFirstMessage) {
-                const autoTitle = generateAutoTitle(effectiveQuestion);
-                if (autoTitle && autoTitle !== nextTrendTitle) {
-                    nextTrendTitle = autoTitle;
-                    api.patch(`/ai/sessions/${activeSessionId}/`, { title: autoTitle }).catch((err) => {
-                        console.warn('Failed to auto-update session title:', err);
-                    });
-                }
-            }
-
-            setActiveSession((prev) => ({
-                ...prev,
-                title: nextTrendTitle,
-                messages: [...(prev?.messages || []), userMsg, assistantMsg],
-                updated_at: new Date().toISOString()
-            }));
-
-            setSessions((prev) =>
-                prev.map((s) => (s.id === activeSessionId ? { ...s, title: nextTrendTitle, updated_at: new Date().toISOString() } : s))
-            );
-
-            scrollToBottom();
-        } catch (err) {
-            if (err.response?.status === 400) {
-                setTrendError(err.response.data?.error || 'Please select between 2 and 4 papers.');
-            } else if (err.response?.status === 401) {
-                setTrendError('Authentication required.');
-            } else if (err.response?.status === 403) {
-                setTrendError('You do not have access to one or more selected papers or this session.');
-            } else if (err.response?.status === 404) {
-                setTrendError('Research session or papers not found.');
-            } else if (err.response?.status === 429) {
-                setTrendError('Gemini API rate limit exceeded. Please try again later.');
-            } else if (err.response?.status === 503) {
-                setTrendError('Gemini is temporarily unavailable. Please try again shortly.');
-            } else {
-                setTrendError(err.response?.data?.error || 'Network or server error. Please try again.');
-            }
-        } finally {
-            setLoadingTrend(false);
-        }
-    };
-
-    // Keyboard shortcut for Single-Paper Ask
+    // Keyboard shortcut for Composer: Enter sends, Shift+Enter for newline
     const handleKeyDown = (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -1717,7 +887,7 @@ function ResearchWorkspace() {
         }
     };
 
-    // Render a single message (User or Assistant)
+    // Render a single message (User or Assistant, with rich historical cards preserved)
     const renderMessage = (msg) => {
         const isUser = msg.role === 'USER';
 
@@ -1732,7 +902,7 @@ function ResearchWorkspace() {
             );
         }
 
-        // Assistant Message: Check for structured comparison, research gap analysis, thematic analysis, or trend analysis JSON
+        // Assistant Message: Check for structured comparison, gap, thematic, or trend analysis JSON from past sessions
         const parsedComp = parseStructuredComparison(msg.content, activeSession?.papers || []);
         const parsedGap = !parsedComp ? parseStructuredGapAnalysis(msg.content, activeSession?.papers || []) : null;
         const parsedThematic = (!parsedComp && !parsedGap) ? parseStructuredThematicAnalysis(msg.content, activeSession?.papers || []) : null;
@@ -1753,7 +923,6 @@ function ResearchWorkspace() {
                                 Cross-Paper Synthesis Matrix
                             </span>
 
-                            {/* Overall Synthesis */}
                             {parsedComp.overall_synthesis && (
                                 <div className="comparison-box">
                                     <h4 className="comparison-box-title" style={{ color: 'var(--accent-primary)' }}>
@@ -1763,7 +932,6 @@ function ResearchWorkspace() {
                                 </div>
                             )}
 
-                            {/* Similarities */}
                             {Array.isArray(parsedComp.similarities) && parsedComp.similarities.length > 0 && (
                                 <div>
                                     <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
@@ -1786,7 +954,6 @@ function ResearchWorkspace() {
                                 </div>
                             )}
 
-                            {/* Differences */}
                             {Array.isArray(parsedComp.differences) && parsedComp.differences.length > 0 && (
                                 <div>
                                     <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
@@ -1809,7 +976,6 @@ function ResearchWorkspace() {
                                 </div>
                             )}
 
-                            {/* Methodology Comparison */}
                             {Array.isArray(parsedComp.methodology_comparison) && parsedComp.methodology_comparison.length > 0 && (
                                 <div>
                                     <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
@@ -1832,7 +998,6 @@ function ResearchWorkspace() {
                                 </div>
                             )}
 
-                            {/* Findings Comparison */}
                             {Array.isArray(parsedComp.findings_comparison) && parsedComp.findings_comparison.length > 0 && (
                                 <div>
                                     <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
@@ -1855,7 +1020,6 @@ function ResearchWorkspace() {
                                 </div>
                             )}
 
-                            {/* Research Gaps & Limitations */}
                             {Array.isArray(parsedComp.research_gaps) && parsedComp.research_gaps.length > 0 && (
                                 <div>
                                     <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
@@ -1900,15 +1064,9 @@ function ResearchWorkspace() {
                     ) : parsedGap ? (
                         <div className="structured-gap-view">
                             <span className="gap-badge-tag">
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                                    <circle cx="12" cy="12" r="10"></circle>
-                                    <line x1="12" y1="8" x2="12" y2="12"></line>
-                                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
-                                </svg>
                                 Multi-Paper Research Gap Analysis
                             </span>
 
-                            {/* Overall Assessment */}
                             {parsedGap.overall_assessment && (
                                 <div className="comparison-box gap-assessment-box">
                                     <h4 className="comparison-box-title" style={{ color: 'var(--accent-primary)' }}>
@@ -1918,7 +1076,6 @@ function ResearchWorkspace() {
                                 </div>
                             )}
 
-                            {/* Common Limitations */}
                             {Array.isArray(parsedGap.common_limitations) && parsedGap.common_limitations.length > 0 && (
                                 <div>
                                     <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
@@ -1941,7 +1098,6 @@ function ResearchWorkspace() {
                                 </div>
                             )}
 
-                            {/* Methodological Gaps */}
                             {Array.isArray(parsedGap.methodological_gaps) && parsedGap.methodological_gaps.length > 0 && (
                                 <div>
                                     <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
@@ -1964,7 +1120,6 @@ function ResearchWorkspace() {
                                 </div>
                             )}
 
-                            {/* Dataset / Population Gaps */}
                             {Array.isArray(parsedGap.dataset_population_gaps) && parsedGap.dataset_population_gaps.length > 0 && (
                                 <div>
                                     <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
@@ -1987,7 +1142,6 @@ function ResearchWorkspace() {
                                 </div>
                             )}
 
-                            {/* Understudied Areas */}
                             {Array.isArray(parsedGap.understudied_areas) && parsedGap.understudied_areas.length > 0 && (
                                 <div>
                                     <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
@@ -2010,7 +1164,6 @@ function ResearchWorkspace() {
                                 </div>
                             )}
 
-                            {/* Contradictions & Inconsistencies */}
                             {Array.isArray(parsedGap.contradictions_inconsistencies) && parsedGap.contradictions_inconsistencies.length > 0 && (
                                 <div>
                                     <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
@@ -2033,7 +1186,6 @@ function ResearchWorkspace() {
                                 </div>
                             )}
 
-                            {/* Unanswered Research Questions */}
                             {Array.isArray(parsedGap.unanswered_research_questions) && parsedGap.unanswered_research_questions.length > 0 && (
                                 <div>
                                     <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
@@ -2056,7 +1208,6 @@ function ResearchWorkspace() {
                                 </div>
                             )}
 
-                            {/* Future Research Directions */}
                             {Array.isArray(parsedGap.future_research_directions) && parsedGap.future_research_directions.length > 0 && (
                                 <div>
                                     <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
@@ -2082,13 +1233,9 @@ function ResearchWorkspace() {
                     ) : parsedThematic ? (
                         <div className="structured-thematic-view">
                             <span className="thematic-badge-tag">
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
-                                </svg>
                                 Cross-Paper Thematic Analysis
                             </span>
 
-                            {/* Overall Synthesis */}
                             {parsedThematic.overall_synthesis && (
                                 <div className="comparison-box thematic-synthesis-box">
                                     <h4 className="comparison-box-title" style={{ color: 'var(--accent-primary)' }}>
@@ -2098,7 +1245,6 @@ function ResearchWorkspace() {
                                 </div>
                             )}
 
-                            {/* Themes List */}
                             {Array.isArray(parsedThematic.themes) && parsedThematic.themes.length > 0 && (
                                 <div className="thematic-themes-list">
                                     <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
@@ -2116,7 +1262,6 @@ function ResearchWorkspace() {
                                                     <p className="thematic-theme-desc">{themeItem.description}</p>
                                                 )}
 
-                                                {/* Papers discussing the theme */}
                                                 {Array.isArray(themeItem.papers) && themeItem.papers.length > 0 && (
                                                     <div className="thematic-papers-section">
                                                         <h6 className="thematic-subheading">Papers Discussing this Theme</h6>
@@ -2124,10 +1269,6 @@ function ResearchWorkspace() {
                                                             {themeItem.papers.map((paperEntry, pIdx) => (
                                                                 <div key={pIdx} className="thematic-paper-entry">
                                                                     <div className="thematic-paper-entry-header">
-                                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                                                                            <polyline points="14 2 14 8 20 8"></polyline>
-                                                                        </svg>
                                                                         <span className="thematic-paper-entry-title">
                                                                             {paperEntry.paper_title || `Paper #${paperEntry.paper_id}`}
                                                                         </span>
@@ -2137,7 +1278,6 @@ function ResearchWorkspace() {
                                                                             {paperEntry.discussion}
                                                                         </p>
                                                                     )}
-                                                                    {/* Evidence sources for this paper discussion */}
                                                                     {Array.isArray(paperEntry.sources) && paperEntry.sources.length > 0 && (
                                                                         <div style={{ marginTop: '0.4rem' }}>
                                                                             {paperEntry.sources.map((src, sIdx) => (
@@ -2151,15 +1291,9 @@ function ResearchWorkspace() {
                                                     </div>
                                                 )}
 
-                                                {/* Cross-paper observation */}
                                                 {themeItem.cross_paper_observation && (
                                                     <div className="thematic-observation-box">
                                                         <div className="thematic-observation-label">
-                                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                                <circle cx="12" cy="12" r="10"></circle>
-                                                                <line x1="12" y1="16" x2="12" y2="12"></line>
-                                                                <line x1="12" y1="8" x2="12.01" y2="8"></line>
-                                                            </svg>
                                                             Cross-Paper Observation
                                                         </div>
                                                         <p className="thematic-observation-text">
@@ -2176,65 +1310,54 @@ function ResearchWorkspace() {
                     ) : parsedTrend ? (
                         <div className="structured-trend-view">
                             <span className="trend-badge-tag">
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                                    <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
-                                    <polyline points="17 6 23 6 23 12"></polyline>
-                                </svg>
-                                Research Trend Analysis
+                                Cross-Paper Research Trend Analysis
                             </span>
 
-                            {/* Overall Trend */}
                             {parsedTrend.overall_trend && (
                                 <div className="comparison-box trend-overall-box">
                                     <h4 className="comparison-box-title" style={{ color: 'var(--accent-primary)' }}>
-                                        Overall Research Trend
+                                        Overall Trend Analysis
                                     </h4>
                                     <MarkdownRenderer content={parsedTrend.overall_trend} />
                                 </div>
                             )}
 
-                            {/* Research Evolution */}
                             {Array.isArray(parsedTrend.research_evolution) && parsedTrend.research_evolution.length > 0 && (
                                 <div className="trend-evolution-section">
                                     <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
-                                        Research Evolution ({parsedTrend.research_evolution.length})
+                                        Research Evolution
                                     </h4>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                                         {parsedTrend.research_evolution.map((evItem, evIdx) => (
                                             <div key={evIdx} className="comparison-box trend-card">
                                                 <div className="trend-header">
-                                                    <span className="trend-number">Trend {evIdx + 1}</span>
-                                                    <h5 className="trend-title">{evItem.trend}</h5>
+                                                    <span className="trend-number">Phase {evIdx + 1}</span>
+                                                    <h5 className="trend-title">{evItem.phase || evItem.trend_title || `Evolution Step ${evIdx + 1}`}</h5>
                                                 </div>
 
                                                 {evItem.description && (
                                                     <p className="trend-desc">{evItem.description}</p>
                                                 )}
 
-                                                {/* Participating papers & observations */}
                                                 {Array.isArray(evItem.papers) && evItem.papers.length > 0 && (
                                                     <div className="trend-papers-section">
-                                                        <h6 className="trend-subheading">Participating Papers & Observations</h6>
+                                                        <h6 className="trend-subheading">Papers Representing this Evolution</h6>
                                                         <div className="trend-papers-list">
-                                                            {evItem.papers.map((pEntry, pIdx) => (
+                                                            {evItem.papers.map((paperEntry, pIdx) => (
                                                                 <div key={pIdx} className="trend-paper-entry">
                                                                     <div className="trend-paper-entry-header">
-                                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                                                                            <polyline points="14 2 14 8 20 8"></polyline>
-                                                                        </svg>
                                                                         <span className="trend-paper-entry-title">
-                                                                            {pEntry.paper_title || `Paper #${pEntry.paper_id}`}
+                                                                            {paperEntry.paper_title || `Paper #${paperEntry.paper_id}`}
                                                                         </span>
                                                                     </div>
-                                                                    {pEntry.observation && (
+                                                                    {paperEntry.observation && (
                                                                         <p className="trend-paper-observation">
-                                                                            {pEntry.observation}
+                                                                            {paperEntry.observation}
                                                                         </p>
                                                                     )}
-                                                                    {Array.isArray(pEntry.sources) && pEntry.sources.length > 0 && (
+                                                                    {Array.isArray(paperEntry.sources) && paperEntry.sources.length > 0 && (
                                                                         <div style={{ marginTop: '0.4rem' }}>
-                                                                            {pEntry.sources.map((src, sIdx) => (
+                                                                            {paperEntry.sources.map((src, sIdx) => (
                                                                                 <EvidenceSource key={sIdx} source={src} projectId={projectId} />
                                                                             ))}
                                                                         </div>
@@ -2245,18 +1368,13 @@ function ResearchWorkspace() {
                                                     </div>
                                                 )}
 
-                                                {/* Evolution observation */}
-                                                {evItem.evolution_observation && (
+                                                {evItem.cross_paper_observation && (
                                                     <div className="trend-observation-box">
                                                         <div className="trend-observation-label">
-                                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
-                                                                <polyline points="17 6 23 6 23 12"></polyline>
-                                                            </svg>
-                                                            Evolution Observation
+                                                            Cross-Paper Evolutionary Observation
                                                         </div>
                                                         <p className="trend-observation-text">
-                                                            {evItem.evolution_observation}
+                                                            {evItem.cross_paper_observation}
                                                         </p>
                                                     </div>
                                                 )}
@@ -2266,87 +1384,63 @@ function ResearchWorkspace() {
                                 </div>
                             )}
 
-                            {/* Emerging Research Directions */}
                             {Array.isArray(parsedTrend.emerging_directions) && parsedTrend.emerging_directions.length > 0 && (
-                                <div>
-                                    <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
-                                        Emerging Research Directions ({parsedTrend.emerging_directions.length})
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                    <h4 style={{ fontSize: '1rem', color: 'var(--text-primary)', margin: '0.25rem 0 0' }}>
+                                        Emerging Research Directions
                                     </h4>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                                        {parsedTrend.emerging_directions.map((item, idx) => (
-                                            <div key={idx} className="comparison-box trend-feature-box">
-                                                <h5 className="trend-feature-title">{item.direction}</h5>
-                                                {item.description && (
-                                                    <p style={{ margin: '0.25rem 0 0 0', lineHeight: 1.5, color: 'var(--text-secondary)' }}>
-                                                        {item.description}
-                                                    </p>
-                                                )}
-                                                {Array.isArray(item.sources) && item.sources.length > 0 && (
-                                                    <div style={{ marginTop: '0.5rem' }}>
-                                                        {item.sources.map((src, sIdx) => (
-                                                            <EvidenceSource key={sIdx} source={src} projectId={projectId} />
-                                                        ))}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        ))}
-                                    </div>
+                                    {parsedTrend.emerging_directions.map((item, idx) => (
+                                        <div key={idx} className="comparison-box trend-feature-box">
+                                            <p className="trend-feature-title">{item.direction || item.summary || item.statement}</p>
+                                            {Array.isArray(item.sources) && item.sources.length > 0 && (
+                                                <div style={{ marginTop: '0.5rem' }}>
+                                                    {item.sources.map((src, sIdx) => (
+                                                        <EvidenceSource key={sIdx} source={src} projectId={projectId} />
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
                                 </div>
                             )}
 
-                            {/* Methodology Evolution */}
                             {Array.isArray(parsedTrend.methodology_evolution) && parsedTrend.methodology_evolution.length > 0 && (
-                                <div>
-                                    <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
-                                        Methodology Evolution ({parsedTrend.methodology_evolution.length})
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                    <h4 style={{ fontSize: '1rem', color: 'var(--text-primary)', margin: '0.25rem 0 0' }}>
+                                        Methodological Evolution
                                     </h4>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                                        {parsedTrend.methodology_evolution.map((item, idx) => (
-                                            <div key={idx} className="comparison-box trend-feature-box">
-                                                <h5 className="trend-feature-title">{item.aspect}</h5>
-                                                {item.description && (
-                                                    <p style={{ margin: '0.25rem 0 0 0', lineHeight: 1.5, color: 'var(--text-secondary)' }}>
-                                                        {item.description}
-                                                    </p>
-                                                )}
-                                                {Array.isArray(item.sources) && item.sources.length > 0 && (
-                                                    <div style={{ marginTop: '0.5rem' }}>
-                                                        {item.sources.map((src, sIdx) => (
-                                                            <EvidenceSource key={sIdx} source={src} projectId={projectId} />
-                                                        ))}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        ))}
-                                    </div>
+                                    {parsedTrend.methodology_evolution.map((item, idx) => (
+                                        <div key={idx} className="comparison-box trend-feature-box">
+                                            <p className="trend-feature-title">{item.trend || item.summary || item.statement}</p>
+                                            {Array.isArray(item.sources) && item.sources.length > 0 && (
+                                                <div style={{ marginTop: '0.5rem' }}>
+                                                    {item.sources.map((src, sIdx) => (
+                                                        <EvidenceSource key={sIdx} source={src} projectId={projectId} />
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
                                 </div>
                             )}
 
-                            {/* Future Research Directions */}
                             {Array.isArray(parsedTrend.future_directions) && parsedTrend.future_directions.length > 0 && (
-                                <div>
-                                    <h4 style={{ fontSize: '1rem', marginBottom: '0.6rem', color: 'var(--text-primary)' }}>
-                                        Future Research Directions ({parsedTrend.future_directions.length})
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                    <h4 style={{ fontSize: '1rem', color: 'var(--text-primary)', margin: '0.25rem 0 0' }}>
+                                        Future Research Trajectories
                                     </h4>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                                        {parsedTrend.future_directions.map((item, idx) => (
-                                            <div key={idx} className="comparison-box trend-feature-box">
-                                                <h5 className="trend-feature-title">{item.direction}</h5>
-                                                {item.description && (
-                                                    <p style={{ margin: '0.25rem 0 0 0', lineHeight: 1.5, color: 'var(--text-secondary)' }}>
-                                                        {item.description}
-                                                    </p>
-                                                )}
-                                                {Array.isArray(item.sources) && item.sources.length > 0 && (
-                                                    <div style={{ marginTop: '0.5rem' }}>
-                                                        {item.sources.map((src, sIdx) => (
-                                                            <EvidenceSource key={sIdx} source={src} projectId={projectId} />
-                                                        ))}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        ))}
-                                    </div>
+                                    {parsedTrend.future_directions.map((item, idx) => (
+                                        <div key={idx} className="comparison-box trend-feature-box">
+                                            <p className="trend-feature-title">{item.direction || item.summary || item.statement}</p>
+                                            {Array.isArray(item.sources) && item.sources.length > 0 && (
+                                                <div style={{ marginTop: '0.5rem' }}>
+                                                    {item.sources.map((src, sIdx) => (
+                                                        <EvidenceSource key={sIdx} source={src} projectId={projectId} />
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
                                 </div>
                             )}
                         </div>
@@ -2356,7 +1450,6 @@ function ResearchWorkspace() {
                         </div>
                     )}
 
-                    {/* Saved Grounded Evidence Sources (Single-Paper Ask) */}
                     {Array.isArray(msg.evidence) && msg.evidence.length > 0 && !parsedComp && !parsedGap && !parsedThematic && !parsedTrend && (
                         <div className="message-evidence-container">
                             <div className="evidence-header-label">
@@ -2376,8 +1469,6 @@ function ResearchWorkspace() {
         );
     };
 
-    const hasAtLeastTwoPapers = (activeSession?.papers?.length || 0) >= 2;
-
     return (
         <div className="research-workspace">
             {/* Top Bar / Breadcrumb */}
@@ -2386,7 +1477,7 @@ function ResearchWorkspace() {
                     &larr; Back to {project ? project.title : 'Project'}
                 </Link>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <div className="workspace-top-bar-right">
                     <button
                         className="mobile-sidebar-toggle-btn"
                         onClick={() => setIsMobileSidebarOpen((prev) => !prev)}
@@ -2401,7 +1492,7 @@ function ResearchWorkspace() {
                     </button>
 
                     <div className="workspace-project-pill">
-                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--accent-primary)' }}></span>
+                        <span className="project-pill-dot"></span>
                         <span>Research Workspace</span>
                     </div>
                 </div>
@@ -2416,7 +1507,7 @@ function ResearchWorkspace() {
             )}
 
             {actionError && (
-                <div className="alert-box error" style={{ marginBottom: '1.25rem' }}>
+                <div className="alert-box error" style={{ marginBottom: '0.75rem', flexShrink: 0 }}>
                     {actionError}
                 </div>
             )}
@@ -2587,14 +1678,14 @@ function ResearchWorkspace() {
                     )}
                 </aside>
 
-                {/* Right Column: Active Session Conversation Thread */}
+                {/* Right Column: Active Session Workspace (Clean, spacious 3-row layout) */}
                 <main className="workspace-main">
                     {sessionError ? (
                         <div className="workspace-empty-state">
                             <div className="alert-box error">{sessionError}</div>
                         </div>
                     ) : loadingSession ? (
-                        <div className="loading-indicator" style={{ height: '100%', minHeight: '400px' }}>
+                        <div className="loading-indicator" style={{ height: '100%', minHeight: '300px' }}>
                             <span className="spinner-icon"></span>
                             Reconstructing saved research conversation...
                         </div>
@@ -2610,7 +1701,7 @@ function ResearchWorkspace() {
                             <p className="empty-state-desc">
                                 {isViewer
                                     ? 'No research sessions have been created for this project yet. Sessions created by collaborators will appear here.'
-                                    : 'Create a session to start your research conversation and view saved synthesis history.'}
+                                    : 'Create a session to start your research conversation and synthesize literature across papers.'}
                             </p>
                             {!isViewer && (
                                 <button
@@ -2642,6 +1733,7 @@ function ResearchWorkspace() {
                     ) : (
                         /* Active Conversation Thread View */
                         <>
+                            {/* Row 1: Compact Workspace Header & Attached Papers Bar */}
                             <div className="workspace-header-group">
                                 <div className="workspace-active-header">
                                     <div className="active-session-title-wrap">
@@ -2704,7 +1796,7 @@ function ResearchWorkspace() {
                                                     <span>{formatSessionTime(activeSession.updated_at)}</span>
                                                     {activeSession.papers && activeSession.papers.length > 0 && (
                                                         <span>
-                                                            {' '} &middot; {activeSession.papers.length} {activeSession.papers.length === 1 ? 'paper' : 'papers'} in session
+                                                            {' '} &middot; {activeSession.papers.length} {activeSession.papers.length === 1 ? 'paper' : 'papers'} attached
                                                         </span>
                                                     )}
                                                 </div>
@@ -2737,72 +1829,70 @@ function ResearchWorkspace() {
                                 {/* Read-Only Viewer Banner */}
                                 {isViewer && (
                                     <div className="workspace-viewer-banner">
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                             <circle cx="12" cy="12" r="10"></circle>
                                             <line x1="12" y1="16" x2="12" y2="12"></line>
                                             <line x1="12" y1="8" x2="12.01" y2="8"></line>
                                         </svg>
-                                        <span>Read-only access &mdash; you can view this research but cannot create or modify analyses.</span>
+                                        <span>Read-only access &mdash; you can view this research session but cannot ask questions or modify analyses.</span>
                                     </div>
                                 )}
-                            </div>
 
-                            {/* Research Papers Section */}
-                            <div className="workspace-papers-bar">
-                                <div className="papers-bar-left">
-                                    <div className="papers-bar-title-wrap">
-                                        <span className="papers-bar-title">
-                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                {/* Compact Attached Papers Bar */}
+                                <div className="workspace-papers-bar">
+                                    <div className="papers-bar-left">
+                                        <div className="papers-bar-title-wrap">
+                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                                                 <polyline points="14 2 14 8 20 8"></polyline>
                                             </svg>
-                                            Research Papers
-                                        </span>
-                                        <span className="papers-count-badge">
-                                            {activeSession.papers?.length || 0}
-                                        </span>
-                                    </div>
-                                    {!isViewer && (
-                                        <button
-                                            type="button"
-                                            className="add-papers-btn"
-                                            onClick={openAddPapersModal}
-                                        >
-                                            + Add Papers
-                                        </button>
-                                    )}
-                                </div>
-                                <div className="papers-tags-list">
-                                    {activeSession.papers && activeSession.papers.length > 0 ? (
-                                        activeSession.papers.map((p) => (
-                                            <span key={p.id} className="paper-tag-pill" title={p.title}>
-                                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, opacity: 0.65 }}>
-                                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                                                    <polyline points="14 2 14 8 20 8"></polyline>
-                                                </svg>
-                                                <span className="paper-tag-title">{p.title}</span>
-                                                {!isViewer && (
-                                                    <button
-                                                        type="button"
-                                                        className="paper-tag-remove"
-                                                        onClick={() => handleRemovePaperFromSession(p.id)}
-                                                        disabled={removingPaperId === p.id}
-                                                        title="Remove paper from session"
-                                                    >
-                                                        {removingPaperId === p.id ? '...' : '\u00D7'}
-                                                    </button>
-                                                )}
+                                            <span className="papers-bar-title">Attached Papers</span>
+                                            <span className="papers-count-badge">
+                                                {activeSession.papers?.length || 0}
                                             </span>
-                                        ))
-                                    ) : (
-                                        <span className="no-papers-hint">
-                                            No papers in this session. Add papers to ask targeted research questions or compare studies.
-                                        </span>
-                                    )}
+                                        </div>
+                                        {!isViewer && (
+                                            <button
+                                                type="button"
+                                                className="add-papers-btn"
+                                                onClick={openAddPapersModal}
+                                            >
+                                                + Manage Papers
+                                            </button>
+                                        )}
+                                    </div>
+                                    <div className="papers-tags-list">
+                                        {activeSession.papers && activeSession.papers.length > 0 ? (
+                                            activeSession.papers.map((p) => (
+                                                <span key={p.id} className="paper-tag-pill" title={p.title}>
+                                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, opacity: 0.65 }}>
+                                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                                        <polyline points="14 2 14 8 20 8"></polyline>
+                                                    </svg>
+                                                    <span className="paper-tag-title">{p.title}</span>
+                                                    {!isViewer && (
+                                                        <button
+                                                            type="button"
+                                                            className="paper-tag-remove"
+                                                            onClick={() => handleRemovePaperFromSession(p.id)}
+                                                            disabled={removingPaperId === p.id}
+                                                            title="Remove paper from session"
+                                                        >
+                                                            {removingPaperId === p.id ? '...' : '\u00D7'}
+                                                        </button>
+                                                    )}
+                                                </span>
+                                            ))
+                                        ) : (
+                                            <span className="no-papers-hint">
+                                                No papers attached to this session. Click + Manage Papers to attach papers.
+                                            </span>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
 
-                            {/* Conversation Scrollable Thread */}
+                            {/* Row 2: Conversation Scroll Area (Dominant Region: 70–80%+ vertical space) */}
                             <div
                                 className="conversation-scroll-area"
                                 ref={chatScrollRef}
@@ -2814,13 +1904,12 @@ function ResearchWorkspace() {
                                     <div className="empty-session-box">
                                         <div className="empty-session-icon">
                                             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
-                                                <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+                                                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
                                             </svg>
                                         </div>
                                         <h3 className="empty-session-title">Start your research</h3>
                                         <p className="empty-session-desc">
-                                             Ask a question about one of your papers, or compare multiple papers.
+                                            Ask research questions across your attached papers to synthesize findings, evaluate methods, and uncover insights.
                                         </p>
                                         <div className="empty-session-hint">
                                             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -2830,653 +1919,152 @@ function ResearchWorkspace() {
                                             </svg>
                                             <span>
                                                 {(activeSession.papers?.length || 0) === 0
-                                                    ? 'Attach papers using the Research Papers section above to get started.'
-                                                    : `${activeSession.papers.length} ${activeSession.papers.length === 1 ? 'paper is' : 'papers are'} attached to this session. Choose a mode below to ask a question or compare.`}
+                                                    ? 'Attach papers using the Attached Papers bar above to get started.'
+                                                    : `${activeSession.papers.length} ${activeSession.papers.length === 1 ? 'paper is' : 'papers are'} attached to this session. Type your question below to begin.`}
                                             </span>
                                         </div>
                                     </div>
                                 )}
 
                                 {loadingAsk && (
-                                    <div className="ai-analyzing-banner">
-                                        <span className="spinner-icon-sm"></span>
-                                        <span>NForge AI is synthesizing research across session papers...</span>
-                                    </div>
-                                )}
-
-                                {loadingCompare && (
-                                    <div className="ai-analyzing-banner">
-                                        <span className="spinner-icon-sm"></span>
-                                        <span>NForge AI is synthesizing cross-paper comparison...</span>
-                                    </div>
-                                )}
-
-                                {loadingGap && (
-                                    <div className="ai-analyzing-banner">
-                                        <span className="spinner-icon-sm"></span>
-                                        <span>NForge AI is analyzing research gaps across papers...</span>
-                                    </div>
-                                )}
-
-                                {loadingThematic && (
-                                    <div className="ai-analyzing-banner thematic-banner">
-                                        <span className="spinner-icon-sm"></span>
-                                        <span>NForge AI is analyzing themes across papers...</span>
-                                    </div>
-                                )}
-
-                                {loadingTrend && (
-                                    <div className="ai-analyzing-banner trend-banner">
-                                        <span className="spinner-icon-sm"></span>
-                                        <span>NForge AI is analyzing research trends across papers...</span>
+                                    <div className="message-row assistant">
+                                        <div className="message-label">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                                <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+                                            </svg>
+                                            NForge
+                                        </div>
+                                        <div className="ai-analyzing-banner">
+                                            <span className="spinner-icon-sm"></span>
+                                            <span>NForge AI is synthesizing research across session papers...</span>
+                                        </div>
                                     </div>
                                 )}
 
                                 <div ref={messagesEndRef} />
                             </div>
 
-                            {/* Floating Scroll to Latest Pill */}
-                            {!isNearBottom && (activeSession.messages?.length || 0) > 0 && (
-                                <button
-                                    type="button"
-                                    className="scroll-to-bottom-pill"
-                                    onClick={() => scrollToBottom(true)}
-                                    aria-label="Scroll to latest message"
-                                >
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                                        <line x1="12" y1="5" x2="12" y2="19"></line>
-                                        <polyline points="19 12 12 19 5 12"></polyline>
-                                    </svg>
-                                    <span>Latest</span>
-                                </button>
-                            )}
+                            {/* Row 3: Spacious Bottom Composer */}
+                            <div className="workspace-composer">
+                                {/* Floating Scroll to Latest Pill */}
+                                {!isNearBottom && (activeSession.messages?.length || 0) > 0 && (
+                                    <button
+                                        type="button"
+                                        className="scroll-to-bottom-pill"
+                                        onClick={() => scrollToBottom(true)}
+                                        aria-label="Scroll to latest message"
+                                    >
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                                            <polyline points="19 12 12 19 5 12"></polyline>
+                                        </svg>
+                                        <span>Latest</span>
+                                    </button>
+                                )}
 
-                            {/* Chat Footer: Action Mode Tabs & Inputs */}
-                            <div className="workspace-chat-footer">
-                                {activeSession.papers && activeSession.papers.length > 0 ? (
-                                    <>
-                                        {/* Action Mode Toggle */}
-                                        <div className="chat-mode-tabs">
-                                            <button
-                                                type="button"
-                                                className={`chat-mode-tab ${chatMode === 'ask' ? 'active' : ''}`}
-                                                onClick={() => setChatMode('ask')}
-                                                disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend}
-                                            >
-                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-                                                </svg>
-                                                Ask Research Question
-                                            </button>
-                                            <button
-                                                type="button"
-                                                className={`chat-mode-tab ${chatMode === 'compare' ? 'active' : ''}`}
-                                                onClick={() => setChatMode('compare')}
-                                                disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend || !hasAtLeastTwoPapers}
-                                                title={!hasAtLeastTwoPapers ? 'Add at least 2 papers to compare' : 'Compare 2 to 4 papers'}
-                                            >
-                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                    <polyline points="16 3 21 3 21 8"></polyline>
-                                                    <line x1="4" y1="20" x2="21" y2="3"></line>
-                                                    <polyline points="21 16 21 21 16 21"></polyline>
-                                                    <line x1="15" y1="15" x2="21" y2="21"></line>
-                                                    <line x1="4" y1="4" x2="9" y2="9"></line>
-                                                </svg>
-                                                Compare Papers
-                                                {!hasAtLeastTwoPapers ? (
-                                                    <span className="mode-tab-badge disabled">Requires 2+ papers</span>
-                                                ) : (
-                                                    <span className="mode-tab-badge">2–4</span>
-                                                )}
-                                            </button>
-                                            {/* Temporarily hidden: Research Gaps mode tab */}
-                                            <button
-                                                type="button"
-                                                className={`chat-mode-tab ${chatMode === 'thematic' ? 'active' : ''}`}
-                                                onClick={() => setChatMode('thematic')}
-                                                disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend || !hasAtLeastTwoPapers}
-                                                title={!hasAtLeastTwoPapers ? 'Add at least 2 papers to analyze themes' : 'Identify cross-paper themes across 2 to 4 papers'}
-                                            >
-                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <div className="composer-container">
+                                    {/* Research prompt shortcuts */}
+                                    {activeSession.papers && activeSession.papers.length > 0 && (
+                                        <div className="composer-shortcuts-row">
+                                            <span className="composer-shortcuts-label">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                                                     <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
                                                 </svg>
-                                                Thematic Analysis
-                                                {!hasAtLeastTwoPapers ? (
-                                                    <span className="mode-tab-badge disabled">Requires 2+ papers</span>
-                                                ) : (
-                                                    <span className="mode-tab-badge">2–4</span>
-                                                )}
-                                            </button>
-                                            <button
-                                                type="button"
-                                                className={`chat-mode-tab ${chatMode === 'trends' ? 'active' : ''}`}
-                                                onClick={() => setChatMode('trends')}
-                                                disabled={loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend || !hasAtLeastTwoPapers}
-                                                title={!hasAtLeastTwoPapers ? 'Add at least 2 papers to analyze research trends' : 'Analyze research trends across 2 to 4 papers'}
-                                            >
-                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                    <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
-                                                    <polyline points="17 6 23 6 23 12"></polyline>
-                                                </svg>
-                                                Research Trends
-                                                {!hasAtLeastTwoPapers ? (
-                                                    <span className="mode-tab-badge disabled">Requires 2+ papers</span>
-                                                ) : (
-                                                    <span className="mode-tab-badge">2–4</span>
-                                                )}
-                                            </button>
-                                        </div>
-
-                                        {/* MODE 1: Multi-Paper Session Chat */}
-                                        {chatMode === 'ask' && (
-                                            <>
-                                                {/* Research Prompt Shortcuts for Session Papers */}
-                                                <div className="prompt-shortcuts-row">
-                                                    <span className="prompt-shortcuts-label">
-                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ opacity: 0.75 }}>
-                                                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-                                                        </svg>
-                                                        Research prompts:
-                                                    </span>
-                                                    {SESSION_RESEARCH_SHORTCUTS.map((item, idx) => (
-                                                        <button
-                                                            key={idx}
-                                                            type="button"
-                                                            className="prompt-shortcut-btn"
-                                                            disabled={isViewer || loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend || !activeSession.papers?.length}
-                                                            onClick={() => setQuestionText(item.prompt)}
-                                                            title={item.prompt}
-                                                            aria-label={`Fill prompt: ${item.label}`}
-                                                        >
-                                                            {item.label}
-                                                        </button>
-                                                    ))}
-                                                </div>
-
-                                                {askError && (
-                                                    <div className="alert-box error" style={{ marginBottom: '0.75rem' }}>
-                                                        {askError}
-                                                    </div>
-                                                )}
-
-                                                <div className="chat-input-row">
-                                                    <textarea
-                                                        className="chat-textarea"
-                                                        placeholder={isViewer ? "Read-only access — asking questions is disabled for viewers." : (!activeSession.papers?.length ? "Add research papers to this session to start asking questions." : "Ask a research question across session papers... (Shift+Enter for newline)")}
-                                                        value={questionText}
-                                                        onChange={(e) => setQuestionText(e.target.value)}
-                                                        onKeyDown={handleKeyDown}
-                                                        disabled={isViewer || loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend || !activeSession.papers?.length}
-                                                        rows={2}
-                                                    />
+                                                Prompts:
+                                            </span>
+                                            <div className="composer-shortcuts-chips">
+                                                {SESSION_RESEARCH_SHORTCUTS.map((item, idx) => (
                                                     <button
-                                                        className={`chat-send-btn ${isViewer ? 'read-only-btn' : ''}`}
-                                                        onClick={handleSendQuestion}
-                                                        disabled={isViewer || loadingAsk || loadingCompare || loadingGap || loadingThematic || loadingTrend || !questionText.trim() || !activeSession.papers?.length}
-                                                        title={isViewer ? "Read-only access" : "Send question (Enter)"}
+                                                        key={idx}
                                                         type="button"
+                                                        className="composer-shortcut-chip"
+                                                        disabled={isViewer || loadingAsk || !activeSession.papers?.length}
+                                                        onClick={() => setQuestionText(item.prompt)}
+                                                        title={item.prompt}
                                                     >
-                                                        {loadingAsk ? (
+                                                        {item.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {askError && (
+                                        <div className="alert-box error" style={{ marginBottom: '0.65rem' }}>
+                                            {askError}
+                                        </div>
+                                    )}
+
+                                    {activeSession.papers && activeSession.papers.length > 0 ? (
+                                        <div className="composer-card">
+                                            <textarea
+                                                className="composer-textarea"
+                                                placeholder={
+                                                    isViewer
+                                                        ? "Read-only access — asking questions is disabled for viewers."
+                                                        : "Ask a research question across session papers... (Enter to send, Shift+Enter for new line)"
+                                                }
+                                                value={questionText}
+                                                onChange={(e) => setQuestionText(e.target.value)}
+                                                onKeyDown={handleKeyDown}
+                                                disabled={isViewer || loadingAsk}
+                                                rows={4}
+                                            />
+                                            <div className="composer-bottom-bar">
+                                                <div className="composer-key-hint">
+                                                    <span><kbd>Enter</kbd> to send &bull; <kbd>Shift+Enter</kbd> for new line</span>
+                                                </div>
+                                                <button
+                                                    className={`composer-send-btn ${isViewer ? 'read-only-btn' : ''}`}
+                                                    onClick={handleSendQuestion}
+                                                    disabled={isViewer || loadingAsk || !questionText.trim()}
+                                                    title={isViewer ? "Read-only access" : "Send question (Enter)"}
+                                                    type="button"
+                                                >
+                                                    {loadingAsk ? (
+                                                        <>
                                                             <span className="spinner-icon-sm"></span>
-                                                        ) : (
-                                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                            <span>Synthesizing...</span>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <span>{isViewer ? "Read-only" : "Send"}</span>
+                                                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                                                                 <line x1="22" y1="2" x2="11" y2="13"></line>
                                                                 <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
                                                             </svg>
-                                                        )}
-                                                        <span>{isViewer ? "Read-only" : "Send"}</span>
-                                                    </button>
-                                                </div>
-                                            </>
-                                        )}
-
-                                        {/* MODE 2: Multi-Paper Comparison */}
-                                        {chatMode === 'compare' && (
-                                            <>
-                                                {/* Select 2-4 Papers for Comparison */}
-                                                <div className="compare-selection-bar">
-                                                    <div className="compare-selection-header">
-                                                        <span className="compare-selection-title">
-                                                            Select 2 to 4 papers to compare:
-                                                        </span>
-                                                        <span className={`compare-selection-count ${selectedComparisonPaperIds.length < 2 ? 'warn' : 'valid'}`}>
-                                                            {selectedComparisonPaperIds.length}/4 selected
-                                                            {selectedComparisonPaperIds.length < 2 && ' (minimum 2)'}
-                                                        </span>
-                                                    </div>
-
-                                                    <div className="compare-papers-grid">
-                                                        {activeSession.papers.map((p) => {
-                                                            const isSelected = selectedComparisonPaperIds.includes(p.id);
-                                                            const isMaxReached = selectedComparisonPaperIds.length >= 4 && !isSelected;
-
-                                                            return (
-                                                                <label
-                                                                    key={p.id}
-                                                                    className={`compare-paper-pill ${isSelected ? 'selected' : ''} ${isMaxReached ? 'disabled' : ''}`}
-                                                                    title={isMaxReached ? 'Maximum 4 papers reached (deselect one first)' : p.title}
-                                                                >
-                                                                    <input
-                                                                        type="checkbox"
-                                                                        checked={isSelected}
-                                                                        disabled={isViewer || loadingTrend || loadingThematic || loadingCompare || loadingGap || loadingAsk || isMaxReached}
-                                                                        onChange={() => handleToggleComparisonPaper(p.id)}
-                                                                    />
-                                                                    <span className="compare-paper-pill-title">{p.title}</span>
-                                                                </label>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                </div>
-
-                                                {/* Research Prompt Shortcuts for Multi-Paper Comparison */}
-                                                <div className="prompt-shortcuts-row">
-                                                    <span className="prompt-shortcuts-label">
-                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ opacity: 0.75 }}>
-                                                            <polyline points="16 3 21 3 21 8"></polyline>
-                                                            <line x1="4" y1="20" x2="21" y2="3"></line>
-                                                            <polyline points="21 16 21 21 16 21"></polyline>
-                                                            <line x1="15" y1="15" x2="21" y2="21"></line>
-                                                            <line x1="4" y1="4" x2="9" y2="9"></line>
-                                                        </svg>
-                                                        Comparison prompts:
-                                                    </span>
-                                                    {COMPARISON_SHORTCUTS.map((item, idx) => (
-                                                        <button
-                                                            key={idx}
-                                                            type="button"
-                                                            className="prompt-shortcut-btn"
-                                                            disabled={isViewer || loadingTrend || loadingThematic || loadingCompare || loadingAsk || loadingGap}
-                                                            onClick={() => setComparisonQuestion(item.prompt)}
-                                                            title={item.prompt}
-                                                            aria-label={`Fill prompt: ${item.label}`}
-                                                        >
-                                                            {item.label}
-                                                        </button>
-                                                    ))}
-                                                </div>
-
-                                                {compareError && (
-                                                    <div className="alert-box error" style={{ marginBottom: '0.75rem' }}>
-                                                        {compareError}
-                                                    </div>
-                                                )}
-
-                                                <div className="chat-input-row">
-                                                    <textarea
-                                                        className="chat-textarea"
-                                                        placeholder={isViewer ? "Read-only access — cross-paper comparisons are disabled for viewers." : "What would you like to compare? e.g. methodology, findings, limitations, and research gaps (Shift+Enter for newline)"}
-                                                        value={comparisonQuestion}
-                                                        onChange={(e) => setComparisonQuestion(e.target.value)}
-                                                        onKeyDown={(e) => {
-                                                            if (e.key === 'Enter' && !e.shiftKey) {
-                                                                e.preventDefault();
-                                                                handleGenerateComparison();
-                                                            }
-                                                        }}
-                                                        disabled={isViewer || loadingTrend || loadingThematic || loadingCompare || loadingGap || loadingAsk}
-                                                        rows={2}
-                                                    />
-                                                    <button
-                                                        className={`chat-send-btn compare-btn ${isViewer ? 'read-only-btn' : ''}`}
-                                                        onClick={handleGenerateComparison}
-                                                        disabled={isViewer || loadingTrend || loadingThematic || loadingCompare || loadingGap || loadingAsk || selectedComparisonPaperIds.length < 2 || selectedComparisonPaperIds.length > 4}
-                                                        title={isViewer ? "Read-only access" : "Generate cross-paper comparison"}
-                                                        type="button"
-                                                    >
-                                                        {loadingCompare ? (
-                                                            <span className="spinner-icon-sm"></span>
-                                                        ) : (
-                                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                                <polyline points="16 3 21 3 21 8"></polyline>
-                                                                <line x1="4" y1="20" x2="21" y2="3"></line>
-                                                                <polyline points="21 16 21 21 16 21"></polyline>
-                                                                <line x1="15" y1="15" x2="21" y2="21"></line>
-                                                                <line x1="4" y1="4" x2="9" y2="9"></line>
-                                                            </svg>
-                                                        )}
-                                                        <span>{isViewer ? "Generate Comparison (Read-only)" : "Generate Comparison"}</span>
-                                                    </button>
-                                                </div>
-                                            </>
-                                        )}
-
-                                        {/* MODE 3: Multi-Paper Research Gap Analysis (mode tab is hidden from selector) */}
-                                        {chatMode === 'gap' && (
-                                            <>
-                                                {/* Select 2-4 Papers for Research Gap Analysis */}
-                                                <div className="compare-selection-bar">
-                                                    <div className="compare-selection-header">
-                                                        <span className="compare-selection-title">
-                                                            Select 2 to 4 papers to analyze gaps:
-                                                        </span>
-                                                        <span className={`compare-selection-count ${selectedGapPaperIds.length < 2 ? 'warn' : 'valid'}`}>
-                                                            {selectedGapPaperIds.length}/4 selected
-                                                            {selectedGapPaperIds.length < 2 && ' (minimum 2)'}
-                                                        </span>
-                                                    </div>
-
-                                                    <div className="compare-papers-grid">
-                                                        {activeSession.papers.map((p) => {
-                                                            const isSelected = selectedGapPaperIds.includes(p.id);
-                                                            const isMaxReached = selectedGapPaperIds.length >= 4 && !isSelected;
-
-                                                            return (
-                                                                <label
-                                                                    key={p.id}
-                                                                    className={`compare-paper-pill ${isSelected ? 'selected' : ''} ${isMaxReached ? 'disabled' : ''}`}
-                                                                    title={isMaxReached ? 'Maximum 4 papers reached (deselect one first)' : p.title}
-                                                                >
-                                                                    <input
-                                                                        type="checkbox"
-                                                                        checked={isSelected}
-                                                                        disabled={isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk || isMaxReached}
-                                                                        onChange={() => handleToggleGapPaper(p.id)}
-                                                                    />
-                                                                    <span className="compare-paper-pill-title">{p.title}</span>
-                                                                </label>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                </div>
-
-                                                {/* Research Prompt Shortcuts for Research Gap Analysis (temporarily hidden) */}
-                                                <div className="prompt-shortcuts-row" style={{ display: 'none' }}>
-                                                    <span className="prompt-shortcuts-label">
-                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ opacity: 0.75 }}>
-                                                            <circle cx="12" cy="12" r="10"></circle>
-                                                            <line x1="12" y1="8" x2="12" y2="12"></line>
-                                                            <line x1="12" y1="16" x2="12.01" y2="16"></line>
-                                                        </svg>
-                                                        Gap prompts:
-                                                    </span>
-                                                    {RESEARCH_GAP_SHORTCUTS.map((item, idx) => (
-                                                        <button
-                                                            key={idx}
-                                                            type="button"
-                                                            className="prompt-shortcut-btn"
-                                                            disabled={isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk}
-                                                            onClick={() => setGapQuestion(item.prompt)}
-                                                            title={item.prompt}
-                                                            aria-label={`Fill prompt: ${item.label}`}
-                                                        >
-                                                            {item.label}
-                                                        </button>
-                                                    ))}
-                                                </div>
-
-                                                {gapError && (
-                                                    <div className="alert-box error" style={{ marginBottom: '0.75rem' }}>
-                                                        {gapError}
-                                                    </div>
-                                                )}
-
-                                                <div className="chat-input-row">
-                                                    <textarea
-                                                        className="chat-textarea"
-                                                        placeholder={isViewer ? "Read-only access — research gap analysis is disabled for viewers." : "Identify the major research gaps, limitations, unanswered questions, and future research directions across these papers..."}
-                                                        value={gapQuestion}
-                                                        onChange={(e) => setGapQuestion(e.target.value)}
-                                                        disabled={isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk}
-                                                        rows={2}
-                                                    />
-                                                    <button
-                                                        className={`chat-send-btn gap-btn ${isViewer ? 'read-only-btn' : ''}`}
-                                                        onClick={handleGenerateGapAnalysis}
-                                                        disabled={isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk || selectedGapPaperIds.length < 2 || selectedGapPaperIds.length > 4}
-                                                        title={isViewer ? "Read-only access" : "Generate research gap analysis"}
-                                                        type="button"
-                                                    >
-                                                        {loadingGap ? (
-                                                            <span className="spinner-icon-sm"></span>
-                                                        ) : (
-                                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                                <circle cx="12" cy="12" r="10"></circle>
-                                                                <line x1="12" y1="8" x2="12" y2="12"></line>
-                                                                <line x1="12" y1="16" x2="12.01" y2="16"></line>
-                                                            </svg>
-                                                        )}
-                                                        <span>{isViewer ? "Generate Gap Analysis (Read-only)" : "Generate Research Gap Analysis"}</span>
-                                                    </button>
-                                                </div>
-                                            </>
-                                        )}
-
-                                        {/* MODE 4: Multi-Paper Thematic Analysis */}
-                                        {chatMode === 'thematic' && (
-                                            <>
-                                                {/* Select 2-4 Papers for Thematic Analysis */}
-                                                <div className="compare-selection-bar">
-                                                    <div className="compare-selection-header">
-                                                        <span className="compare-selection-title">
-                                                            Select 2 to 4 papers to analyze themes:
-                                                        </span>
-                                                        <span className={`compare-selection-count ${selectedThematicPaperIds.length < 2 ? 'warn' : 'valid'}`}>
-                                                            {selectedThematicPaperIds.length}/4 selected
-                                                            {selectedThematicPaperIds.length < 2 && ' (minimum 2)'}
-                                                        </span>
-                                                    </div>
-
-                                                    <div className="compare-papers-grid">
-                                                        {activeSession.papers.map((p) => {
-                                                            const isSelected = selectedThematicPaperIds.includes(p.id);
-                                                            const isMaxReached = selectedThematicPaperIds.length >= 4 && !isSelected;
-
-                                                            return (
-                                                                <label
-                                                                    key={p.id}
-                                                                    className={`compare-paper-pill ${isSelected ? 'selected' : ''} ${isMaxReached ? 'disabled' : ''}`}
-                                                                    title={isMaxReached ? 'Maximum 4 papers reached (deselect one first)' : p.title}
-                                                                >
-                                                                    <input
-                                                                        type="checkbox"
-                                                                        checked={isSelected}
-                                                                        disabled={isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk || isMaxReached}
-                                                                        onChange={() => handleToggleThematicPaper(p.id)}
-                                                                    />
-                                                                    <span className="compare-paper-pill-title">{p.title}</span>
-                                                                </label>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                </div>
-
-                                                {/* Research Prompt Shortcuts for Thematic Analysis */}
-                                                <div className="prompt-shortcuts-row">
-                                                    <span className="prompt-shortcuts-label">
-                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ opacity: 0.75 }}>
-                                                            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
-                                                        </svg>
-                                                        Thematic prompts:
-                                                    </span>
-                                                    {THEMATIC_SHORTCUTS.map((item, idx) => (
-                                                        <button
-                                                            key={idx}
-                                                            type="button"
-                                                            className="prompt-shortcut-btn"
-                                                            disabled={isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk}
-                                                            onClick={() => setThematicQuestion(item.prompt)}
-                                                            title={item.prompt}
-                                                            aria-label={`Fill prompt: ${item.label}`}
-                                                        >
-                                                            {item.label}
-                                                        </button>
-                                                    ))}
-                                                </div>
-
-                                                {thematicError && (
-                                                    <div className="alert-box error" style={{ marginBottom: '0.75rem' }}>
-                                                        {thematicError}
-                                                    </div>
-                                                )}
-
-                                                <div className="chat-input-row">
-                                                    <textarea
-                                                        className="chat-textarea"
-                                                        placeholder={isViewer ? "Read-only access — thematic analysis is disabled for viewers." : "Identify the major themes, recurring concepts, and important cross-paper patterns across these papers... (Shift+Enter for newline)"}
-                                                        value={thematicQuestion}
-                                                        onChange={(e) => setThematicQuestion(e.target.value)}
-                                                        onKeyDown={(e) => {
-                                                            if (e.key === 'Enter' && !e.shiftKey) {
-                                                                e.preventDefault();
-                                                                handleGenerateThematicAnalysis();
-                                                            }
-                                                        }}
-                                                        disabled={isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk}
-                                                        rows={2}
-                                                    />
-                                                    <button
-                                                        className={`chat-send-btn thematic-btn ${isViewer ? 'read-only-btn' : ''}`}
-                                                        onClick={handleGenerateThematicAnalysis}
-                                                        disabled={isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk || selectedThematicPaperIds.length < 2 || selectedThematicPaperIds.length > 4}
-                                                        title={isViewer ? "Read-only access" : "Generate cross-paper thematic analysis"}
-                                                        type="button"
-                                                    >
-                                                        {loadingThematic ? (
-                                                            <span className="spinner-icon-sm"></span>
-                                                        ) : (
-                                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
-                                                            </svg>
-                                                        )}
-                                                        <span>{isViewer ? "Generate Thematic Analysis (Read-only)" : "Generate Thematic Analysis"}</span>
-                                                    </button>
-                                                </div>
-                                            </>
-                                        )}
-
-                                        {/* MODE 5: Multi-Paper Research Trend Analysis */}
-                                        {chatMode === 'trends' && (
-                                            <>
-                                                {/* Select 2-4 Papers for Research Trend Analysis */}
-                                                <div className="compare-selection-bar">
-                                                    <div className="compare-selection-header">
-                                                        <span className="compare-selection-title">
-                                                            Select 2 to 4 papers to analyze research trends:
-                                                        </span>
-                                                        <span className={`compare-selection-count ${selectedTrendPaperIds.length < 2 ? 'warn' : 'valid'}`}>
-                                                            {selectedTrendPaperIds.length}/4 selected
-                                                            {selectedTrendPaperIds.length < 2 && ' (minimum 2)'}
-                                                        </span>
-                                                    </div>
-
-                                                    <div className="compare-papers-grid">
-                                                        {activeSession.papers.map((p) => {
-                                                            const isSelected = selectedTrendPaperIds.includes(p.id);
-                                                            const isMaxReached = selectedTrendPaperIds.length >= 4 && !isSelected;
-
-                                                            return (
-                                                                <label
-                                                                    key={p.id}
-                                                                    className={`compare-paper-pill ${isSelected ? 'selected' : ''} ${isMaxReached ? 'disabled' : ''}`}
-                                                                    title={isMaxReached ? 'Maximum 4 papers reached (deselect one first)' : p.title}
-                                                                >
-                                                                    <input
-                                                                        type="checkbox"
-                                                                        checked={isSelected}
-                                                                        disabled={isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk || isMaxReached}
-                                                                        onChange={() => handleToggleTrendPaper(p.id)}
-                                                                    />
-                                                                    <span className="compare-paper-pill-title">{p.title}</span>
-                                                                </label>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                </div>
-
-                                                {/* Research Prompt Shortcuts for Trend Analysis */}
-                                                <div className="prompt-shortcuts-row">
-                                                    <span className="prompt-shortcuts-label">
-                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ opacity: 0.75 }}>
-                                                            <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
-                                                            <polyline points="17 6 23 6 23 12"></polyline>
-                                                        </svg>
-                                                        Trend prompts:
-                                                    </span>
-                                                    {TREND_SHORTCUTS.map((item, idx) => (
-                                                        <button
-                                                            key={idx}
-                                                            type="button"
-                                                            className="prompt-shortcut-btn"
-                                                            disabled={isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk}
-                                                            onClick={() => setTrendQuestion(item.prompt)}
-                                                            title={item.prompt}
-                                                            aria-label={`Fill prompt: ${item.label}`}
-                                                        >
-                                                            {item.label}
-                                                        </button>
-                                                    ))}
-                                                </div>
-
-                                                {trendError && (
-                                                    <div className="alert-box error" style={{ marginBottom: '0.75rem' }}>
-                                                        {trendError}
-                                                    </div>
-                                                )}
-
-                                                <div className="chat-input-row">
-                                                    <textarea
-                                                        className="chat-textarea"
-                                                        placeholder={isViewer ? "Read-only access — research trend analysis is disabled for viewers." : "Analyze how research has evolved across these papers, including changes in methods, approaches, research focus, emerging directions, and future research. (Shift+Enter for newline)"}
-                                                        value={trendQuestion}
-                                                        onChange={(e) => setTrendQuestion(e.target.value)}
-                                                        onKeyDown={(e) => {
-                                                            if (e.key === 'Enter' && !e.shiftKey) {
-                                                                e.preventDefault();
-                                                                handleGenerateTrendAnalysis();
-                                                            }
-                                                        }}
-                                                        disabled={isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk}
-                                                        rows={2}
-                                                    />
-                                                    <button
-                                                        className={`chat-send-btn trend-btn ${isViewer ? 'read-only-btn' : ''}`}
-                                                        onClick={handleGenerateTrendAnalysis}
-                                                        disabled={isViewer || loadingTrend || loadingThematic || loadingGap || loadingCompare || loadingAsk || selectedTrendPaperIds.length < 2 || selectedTrendPaperIds.length > 4}
-                                                        title={isViewer ? "Read-only access" : "Generate research trend analysis"}
-                                                        type="button"
-                                                    >
-                                                        {loadingTrend ? (
-                                                            <span className="spinner-icon-sm"></span>
-                                                        ) : (
-                                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
-                                                                <polyline points="17 6 23 6 23 12"></polyline>
-                                                            </svg>
-                                                        )}
-                                                        <span>{isViewer ? "Generate Trend Analysis (Read-only)" : "Generate Trend Analysis"}</span>
-                                                    </button>
-                                                </div>
-                                            </>
-                                        )}
-                                    </>
-                                ) : (
-                                    <div className="no-papers-chat-notice">
-                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                            <circle cx="12" cy="12" r="10"></circle>
-                                            <line x1="12" y1="8" x2="12" y2="12"></line>
-                                            <line x1="12" y1="16" x2="12.01" y2="16"></line>
-                                        </svg>
-                                        <span>Add research papers to this session to start asking questions.</span>
-                                        {!isViewer && (
-                                            <button
-                                                className="action-btn-secondary"
-                                                style={{ marginLeft: 'auto', fontSize: '0.8rem' }}
-                                                onClick={openAddPapersModal}
-                                                type="button"
-                                            >
-                                                + Add Papers
-                                            </button>
-                                        )}
-                                    </div>
-                                )}
+                                                        </>
+                                                    )}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="composer-no-papers-card">
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                <circle cx="12" cy="12" r="10"></circle>
+                                                <line x1="12" y1="8" x2="12" y2="12"></line>
+                                                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                                            </svg>
+                                            <span>Add research papers to this session to ask questions.</span>
+                                            {!isViewer && (
+                                                <button
+                                                    className="action-btn-primary"
+                                                    onClick={openAddPapersModal}
+                                                    type="button"
+                                                >
+                                                    + Manage Papers
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </>
                     )}
                 </main>
             </div>
 
-            {/* Add Papers Modal */}
+            {/* Add / Manage Papers Modal */}
             {isPapersModalOpen && (
                 <div className="modal-overlay" onClick={() => setIsPapersModalOpen(false)}>
                     <div className="papers-modal" onClick={(e) => e.stopPropagation()}>
@@ -3536,36 +2124,38 @@ function ResearchWorkspace() {
                         </div>
                         <div className="papers-modal-footer">
                             <button
+                                type="button"
                                 className="action-btn-secondary"
                                 onClick={() => setIsPapersModalOpen(false)}
                                 disabled={savingPapers}
-                                type="button"
                             >
                                 Cancel
                             </button>
                             <button
+                                type="button"
                                 className="action-btn-primary"
                                 onClick={handleSaveSessionPapers}
-                                disabled={savingPapers || projectPapers.length === 0 || isViewer}
-                                type="button"
+                                disabled={savingPapers || projectPapers.length === 0}
                             >
-                                {savingPapers ? 'Saving...' : `Save Papers (${selectedModalPaperIds.length})`}
+                                {savingPapers ? 'Saving...' : 'Save Papers'}
                             </button>
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* Reusable Confirmation Modal for Delete Session */}
-            <DeleteModal
-                isOpen={Boolean(deletingSession)}
-                onClose={() => setDeletingSession(null)}
-                onConfirm={handleConfirmDelete}
-                title="Delete Research Session"
-                message={`Are you sure you want to delete "${deletingSession?.title}"? All messages and evidence links in this session will be permanently removed.`}
-                warning="This action cannot be undone. Associated papers and projects will not be deleted."
-                isDeleting={isDeleting}
-            />
+            {/* Delete Session Confirmation Modal */}
+            {deletingSession && (
+                <DeleteModal
+                    isOpen={Boolean(deletingSession)}
+                    title="Delete Research Session"
+                    message={`Are you sure you want to delete "${deletingSession.title}"? All conversations and synthesis history in this session will be permanently deleted.`}
+                    confirmLabel="Delete Session"
+                    isLoading={isDeleting}
+                    onConfirm={handleConfirmDelete}
+                    onCancel={() => setDeletingSession(null)}
+                />
+            )}
         </div>
     );
 }
