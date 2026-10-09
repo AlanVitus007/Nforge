@@ -6,6 +6,7 @@ import { AuthContext } from '../context/AuthContext';
 import EvidenceSource from '../components/EvidenceSource';
 import DeleteModal from '../components/DeleteModal';
 import MarkdownRenderer from '../components/MarkdownRenderer';
+import NotebookUsageIndicator from '../components/NotebookUsageIndicator';
 import { getProjectMembers, determineUserRole } from '../services/collaboration';
 import NotebookButton from '../components/notebook/NotebookButton';
 import PaperNotebookPanel from '../components/notebook/PaperNotebookPanel';
@@ -846,7 +847,9 @@ function ResearchWorkspace() {
                     page_number: src.page_number,
                     text: src.text,
                     citation_id: src.citation_id
-                }))
+                })),
+                notes_used: data.notes_used || [],
+                notes_used_count: data.notes_used_count || 0
             };
 
             // Auto-title session if it has default generic title and this is the first message
@@ -1466,6 +1469,12 @@ function ResearchWorkspace() {
                             <MarkdownRenderer content={msg.content} />
                         </div>
                     )}
+
+                    <NotebookUsageIndicator
+                        notesUsed={msg.notes_used}
+                        notesUsedCount={msg.notes_used_count}
+                        sessionPapers={activeSession?.papers}
+                    />
 
                     {Array.isArray(msg.evidence) && msg.evidence.length > 0 && !parsedComp && !parsedGap && !parsedThematic && !parsedTrend && (
                         <div className="message-evidence-container">

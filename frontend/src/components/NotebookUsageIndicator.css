@@ -1,0 +1,148 @@
+/* Notebook Usage Indicator Component Styles */
+
+.notebook-usage-container {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    margin-top: 0.75rem;
+    margin-bottom: 0.5rem;
+    font-family: inherit;
+}
+
+.notebook-usage-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.28rem 0.65rem;
+    background: rgba(99, 102, 241, 0.08);
+    border: 1px solid rgba(99, 102, 241, 0.22);
+    border-radius: var(--radius-sm, 0.375rem);
+    color: var(--text-secondary);
+    font-size: 0.785rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    user-select: none;
+    text-align: left;
+    outline: none;
+}
+
+.notebook-usage-badge:hover {
+    background: rgba(99, 102, 241, 0.14);
+    border-color: rgba(99, 102, 241, 0.38);
+    color: var(--text-primary);
+}
+
+.notebook-usage-badge:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 1px;
+}
+
+.notebook-usage-badge.expanded {
+    background: rgba(99, 102, 241, 0.15);
+    border-color: rgba(99, 102, 241, 0.4);
+    color: var(--text-primary);
+}
+
+.notebook-usage-badge-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent-primary);
+    flex-shrink: 0;
+}
+
+.notebook-usage-label {
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 0.785rem;
+}
+
+.notebook-usage-separator {
+    color: var(--text-muted);
+    font-weight: bold;
+    user-select: none;
+    font-size: 0.75rem;
+}
+
+.notebook-usage-count {
+    color: var(--accent-primary);
+    font-weight: 600;
+    font-size: 0.785rem;
+}
+
+.notebook-usage-chevron {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    margin-left: 0.15rem;
+    transition: transform 0.2s ease;
+}
+
+.notebook-usage-chevron.rotated {
+    transform: rotate(180deg);
+}
+
+.notebook-usage-dropdown {
+    margin-top: 0.4rem;
+    padding: 0.6rem 0.85rem;
+    background: var(--bg-tertiary, #232730);
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+    border-radius: var(--radius-md, 0.5rem);
+    max-width: 480px;
+    width: 100%;
+    box-shadow: var(--shadow-sm, 0 1px 3px rgba(0, 0, 0, 0.1));
+    animation: notebookDropdownFadeIn 0.15s ease-out;
+}
+
+@keyframes notebookDropdownFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.notebook-usage-loading,
+.notebook-usage-fallback {
+    font-size: 0.775rem;
+    color: var(--text-muted);
+    line-height: 1.45;
+}
+
+.notebook-usage-titles-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.notebook-usage-title-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.785rem;
+    color: var(--text-secondary);
+}
+
+.notebook-usage-title-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background-color: var(--accent-primary);
+    flex-shrink: 0;
+}
+
+.notebook-usage-title-text {
+    font-weight: 500;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}

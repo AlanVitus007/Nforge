@@ -1,8 +1,9 @@
 import React from "react";
+import ReactDOM from "react-dom";
 import "./NotebookButton.css";
 
 const NotebookButton = ({ onClick, isOpen = false, notesCount = null }) => {
-    return (
+    const buttonElement = (
         <button
             type="button"
             id="nforge-notebook-btn"
@@ -14,12 +15,12 @@ const NotebookButton = ({ onClick, isOpen = false, notesCount = null }) => {
         >
             <div className="dock-btn-icon-wrapper">
                 <svg
-                    width="18"
-                    height="18"
+                    width="24"
+                    height="24"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
-                    strokeWidth="2"
+                    strokeWidth="2.2"
                     strokeLinecap="round"
                     strokeLinejoin="round"
                 >
@@ -35,6 +36,11 @@ const NotebookButton = ({ onClick, isOpen = false, notesCount = null }) => {
             )}
         </button>
     );
+
+    if (typeof document !== "undefined") {
+        return ReactDOM.createPortal(buttonElement, document.body);
+    }
+    return buttonElement;
 };
 
 export default NotebookButton;

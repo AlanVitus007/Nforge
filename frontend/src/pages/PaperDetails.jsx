@@ -7,6 +7,7 @@ import Button from "../components/Button";
 import { getProjectMembers, determineUserRole } from "../services/collaboration";
 import NotebookButton from "../components/notebook/NotebookButton";
 import PaperNotebookPanel from "../components/notebook/PaperNotebookPanel";
+import NotebookUsageIndicator from "../components/NotebookUsageIndicator";
 import "./PaperDetails.css";
 
 function PaperDetails() {
@@ -34,6 +35,8 @@ function PaperDetails() {
     const [searchQuery, setSearchQuery] = useState("");
     const [searchAnswer, setSearchAnswer] = useState("");
     const [searchSources, setSearchSources] = useState([]);
+    const [searchNotesUsed, setSearchNotesUsed] = useState([]);
+    const [searchNotesUsedCount, setSearchNotesUsedCount] = useState(0);
     const [searchLoading, setSearchLoading] = useState(false);
     const [searchError, setSearchError] = useState("");
 
@@ -293,6 +296,8 @@ function PaperDetails() {
             setSearchError("Please enter a question.");
             setSearchAnswer("");
             setSearchSources([]);
+            setSearchNotesUsed([]);
+            setSearchNotesUsedCount(0);
             return;
         }
 
@@ -301,6 +306,8 @@ function PaperDetails() {
             setSearchError("");
             setSearchAnswer("");
             setSearchSources([]);
+            setSearchNotesUsed([]);
+            setSearchNotesUsedCount(0);
 
             const response = await api.post("/ai/ask/", {
                 paper_id: paperId,
@@ -315,6 +322,8 @@ function PaperDetails() {
             );
 
             setSearchSources(response.data.sources || []);
+            setSearchNotesUsed(response.data.notes_used || []);
+            setSearchNotesUsedCount(response.data.notes_used_count || 0);
         } catch (err) {
             console.error("AI search failed:", err);
             setSearchError(getApiErrorMessage(err, "Failed to get an answer from this paper. Please try again."));
@@ -755,6 +764,12 @@ function PaperDetails() {
                                     >
                                         {searchAnswer}
                                     </p>
+
+                                    <NotebookUsageIndicator
+                                        notesUsed={searchNotesUsed}
+                                        notesUsedCount={searchNotesUsedCount}
+                                        paperId={paperId}
+                                    />
 
                                     {/* SOURCES */}
                                     {searchSources.length > 0 && (

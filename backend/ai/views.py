@@ -18,6 +18,7 @@ from .serializers import (
 from .services import (
     semantic_search,
     generate_ai_answer,
+    retrieve_relevant_user_notes,
     generate_paper_summary,
     generate_research_gaps,
     retrieve_multi_paper_evidence,
@@ -120,6 +121,8 @@ def ask_ai(request):
                     "code": "BAD_REQUEST"
                 }, status=status.HTTP_400_BAD_REQUEST)
 
+        relevant_notes = retrieve_relevant_user_notes(request.user, paper, question)
+
         if session:
             with transaction.atomic():
                 user_msg = ResearchMessage.objects.create(
@@ -129,7 +132,7 @@ def ask_ai(request):
                 )
 
                 search_results = semantic_search(question, paper, top_k=5)
-                ai_response = generate_ai_answer(question, search_results)
+                ai_response = generate_ai_answer(question, search_results, relevant_notes=relevant_notes)
 
                 assistant_msg = ResearchMessage.objects.create(
                     session=session,
@@ -164,7 +167,7 @@ def ask_ai(request):
                 return Response(ai_response, status=status.HTTP_200_OK)
         else:
             search_results = semantic_search(question, paper, top_k=5)
-            ai_response = generate_ai_answer(question, search_results)
+            ai_response = generate_ai_answer(question, search_results, relevant_notes=relevant_notes)
             return Response(ai_response, status=status.HTTP_200_OK)
 
     except Exception as e:
@@ -230,6 +233,8 @@ def research_ask_view(request):
                     "code": "BAD_REQUEST"
                 }, status=status.HTTP_400_BAD_REQUEST)
 
+        relevant_notes = retrieve_relevant_user_notes(request.user, session_papers, question.strip())
+
         with transaction.atomic():
             user_msg = ResearchMessage.objects.create(
                 session=session,
@@ -237,7 +242,11 @@ def research_ask_view(request):
                 content=question.strip(),
             )
 
-            ai_response = generate_research_answer(question.strip(), session)
+            ai_response = generate_research_answer(
+                question.strip(),
+                session,
+                relevant_notes=relevant_notes,
+            )
 
             assistant_msg = ResearchMessage.objects.create(
                 session=session,

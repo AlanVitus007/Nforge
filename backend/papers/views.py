@@ -18,6 +18,7 @@ from .serializers import PaperSerializer, PaperNoteSerializer
 from ai.services import (
     semantic_search,
     generate_ai_answer,
+    retrieve_relevant_user_notes,
     create_paper_chunks,
 )
 
@@ -291,9 +292,11 @@ def paper_semantic_search(request, project_id, paper_id):
     )
 
     try:
+        relevant_notes = retrieve_relevant_user_notes(request.user, paper, query)
         answer = generate_ai_answer(
             query,
             search_results,
+            relevant_notes=relevant_notes,
         )
 
     except Exception as error:

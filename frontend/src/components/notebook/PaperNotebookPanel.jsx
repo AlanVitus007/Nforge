@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
+import ReactDOM from "react-dom";
 import {
     getPaperNotes,
     createPaperNote,
@@ -402,7 +403,7 @@ const PaperNotebookPanel = ({
     const currentPaperObject =
         papers.find((p) => String(p.id) === String(selectedPaperId)) || currentPaper;
 
-    return (
+    const panelContent = (
         <div className="nforge-notebook-overlay animate-fade-in" onClick={handleClose}>
             <aside
                 className="nforge-notebook-panel animate-slide-left"
@@ -870,6 +871,11 @@ const PaperNotebookPanel = ({
             )}
         </div>
     );
+
+    if (typeof document !== "undefined") {
+        return ReactDOM.createPortal(panelContent, document.body);
+    }
+    return panelContent;
 };
 
 export default PaperNotebookPanel;
