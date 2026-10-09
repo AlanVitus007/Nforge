@@ -7,6 +7,8 @@ import EvidenceSource from '../components/EvidenceSource';
 import DeleteModal from '../components/DeleteModal';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 import { getProjectMembers, determineUserRole } from '../services/collaboration';
+import NotebookButton from '../components/notebook/NotebookButton';
+import PaperNotebookPanel from '../components/notebook/PaperNotebookPanel';
 import './ResearchWorkspace.css';
 
 /**
@@ -371,6 +373,9 @@ function ResearchWorkspace() {
     const [selectedModalPaperIds, setSelectedModalPaperIds] = useState([]);
     const [savingPapers, setSavingPapers] = useState(false);
     const [removingPaperId, setRemovingPaperId] = useState(null);
+
+    // Paper-Specific Notebook state
+    const [isNotebookOpen, setIsNotebookOpen] = useState(false);
 
     // Live Multi-Paper Session Research Chat State
     const [questionText, setQuestionText] = useState('');
@@ -2168,6 +2173,19 @@ function ResearchWorkspace() {
                     onCancel={() => setDeletingSession(null)}
                 />
             )}
+
+            {/* Left-edge Fixed Notebook Dock Button */}
+            <NotebookButton
+                isOpen={isNotebookOpen}
+                onClick={() => setIsNotebookOpen((prev) => !prev)}
+            />
+
+            {/* Paper-Specific Notebook Panel */}
+            <PaperNotebookPanel
+                isOpen={isNotebookOpen}
+                onClose={() => setIsNotebookOpen(false)}
+                papers={activeSession?.papers || []}
+            />
         </div>
     );
 }

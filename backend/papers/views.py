@@ -12,8 +12,8 @@ from rest_framework.response import Response
 from projects.models import Project
 from projects.permissions import can_view_project, can_edit_project_content
 
-from .models import Paper
-from .serializers import PaperSerializer
+from .models import Paper, PaperNote
+from .serializers import PaperSerializer, PaperNoteSerializer
 
 from ai.services import (
     semantic_search,
@@ -312,3 +312,58 @@ def paper_semantic_search(request, project_id, paper_id):
         },
         status=status.HTTP_200_OK,
     )
+
+
+class PaperNoteListCreateView(generics.ListCreateAPIView):
+    """
+    GET  /api/papers/<paper_id>/notes/
+    POST /api/papers/<paper_id>/notes/
+    Also supports:
+    GET  /api/projects/<project_id>/papers/<paper_id>/notes/
+    POST /api/projects/<project_id>/papers/<paper_id>/notes/
+    """
+    serializer_class = PaperNoteSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _get_paper(self):
+        paper_id = self.kwargs["paper_id"]
+        paper = get_object_or_404(Paper, pk=paper_id)
+        if not can_view_project(self.request.user, paper.project):
+            raise Http404("Paper not found.")
+        return paper
+
+    def get_queryset(self):
+        paper = self._get_paper()
+        return PaperNote.objects.filter(
+            paper=paper,
+            user=self.request.user
+        ).order_by("-updated_at")
+
+    def perform_create(self, serializer):
+        paper = self._get_paper()
+        serializer.save(
+            paper=paper,
+            user=self.request.user
+        )
+
+
+class PaperNoteDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    GET    /api/paper-notes/<note_id>/
+    PATCH  /api/paper-notes/<note_id>/
+    PUT    /api/paper-notes/<note_id>/
+    DELETE /api/paper-notes/<note_id>/
+    """
+    serializer_class = PaperNoteSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self):
+        note_id = self.kwargs.get("note_id") or self.kwargs.get("pk")
+        note = get_object_or_404(
+            PaperNote,
+            pk=note_id,
+            user=self.request.user
+        )
+        if not can_view_project(self.request.user, note.paper.project):
+            raise Http404("Note not found.")
+        return note

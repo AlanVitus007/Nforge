@@ -1,0 +1,76 @@
+/* Fixed docked notebook trigger button on the left edge */
+.nforge-notebook-dock-btn {
+  position: fixed;
+  left: 0;
+  top: 170px;
+  z-index: 850;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.85rem 0.55rem 0.65rem;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-left: none;
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  backdrop-filter: blur(10px);
+  user-select: none;
+}
+
+.nforge-notebook-dock-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
+  transform: translateX(3px);
+  box-shadow: var(--shadow-lg), 0 0 12px rgba(37, 99, 235, 0.2);
+}
+
+.nforge-notebook-dock-btn.active {
+  background: var(--accent-primary);
+  color: #ffffff;
+  border-color: var(--accent-primary);
+  box-shadow: var(--shadow-md);
+}
+
+.dock-btn-icon-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dock-btn-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.dock-btn-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.35rem;
+  border-radius: var(--radius-full);
+  font-size: 0.725rem;
+  font-weight: 700;
+  background: rgba(37, 99, 235, 0.15);
+  color: var(--accent-primary);
+}
+
+.nforge-notebook-dock-btn.active .dock-btn-count {
+  background: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+
+/* Mobile responsive dock positioning */
+@media (max-width: 768px) {
+  .nforge-notebook-dock-btn {
+    top: auto;
+    bottom: 85px;
+    padding: 0.5rem 0.75rem 0.5rem 0.5rem;
+  }
+}

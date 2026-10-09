@@ -2,6 +2,7 @@ from django.urls import path
 from .views import (
     PaperListCreateView,
     PaperDetailView,
+    PaperNoteListCreateView,
     paper_semantic_search,
     reprocess_paper,
 )
@@ -9,6 +10,11 @@ from .views import (
 urlpatterns = [
     path('', PaperListCreateView.as_view(), name='paper-list-create'),
     path('<int:paper_id>/', PaperDetailView.as_view(), name='paper-detail'),
+    path(
+        "<int:paper_id>/notes/",
+        PaperNoteListCreateView.as_view(),
+        name="project-paper-notes-list-create",
+    ),
     path(
         "<int:paper_id>/search/",
         paper_semantic_search,

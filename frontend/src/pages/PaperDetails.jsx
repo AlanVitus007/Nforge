@@ -5,6 +5,8 @@ import { AuthContext } from "../context/AuthContext";
 import Card from "../components/Card";
 import Button from "../components/Button";
 import { getProjectMembers, determineUserRole } from "../services/collaboration";
+import NotebookButton from "../components/notebook/NotebookButton";
+import PaperNotebookPanel from "../components/notebook/PaperNotebookPanel";
 import "./PaperDetails.css";
 
 function PaperDetails() {
@@ -24,6 +26,10 @@ function PaperDetails() {
     const [showDeletePopup, setShowDeletePopup] = useState(false);
     const [paperToDelete, setPaperToDelete] = useState(null);
     const [isDeleting, setIsDeleting] = useState(false);
+
+    // Paper Notebook panel states
+    const [isNotebookOpen, setIsNotebookOpen] = useState(false);
+    const [notebookNotesCount, setNotebookNotesCount] = useState(null);
 
     const [searchQuery, setSearchQuery] = useState("");
     const [searchAnswer, setSearchAnswer] = useState("");
@@ -1401,6 +1407,26 @@ function PaperDetails() {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* Fixed Left Docked Notebook Button */}
+            {paper && (
+                <NotebookButton
+                    isOpen={isNotebookOpen}
+                    onClick={() => setIsNotebookOpen((prev) => !prev)}
+                    notesCount={notebookNotesCount}
+                />
+            )}
+
+            {/* Paper Notebook Panel */}
+            {paper && (
+                <PaperNotebookPanel
+                    isOpen={isNotebookOpen}
+                    onClose={() => setIsNotebookOpen(false)}
+                    currentPaper={paper}
+                    papers={[paper]}
+                    onNotesCountChange={setNotebookNotesCount}
+                />
             )}
         </div>
     );
