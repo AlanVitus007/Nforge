@@ -5,6 +5,7 @@ const NotebookButton = ({ onClick, isOpen = false, notesCount = null }) => {
     return (
         <button
             type="button"
+            id="nforge-notebook-btn"
             className={`nforge-notebook-dock-btn ${isOpen ? "active" : ""}`}
             onClick={onClick}
             title={isOpen ? "Close Notebook" : "Open Paper Notebook"}

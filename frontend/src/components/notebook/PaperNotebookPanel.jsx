@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import {
     getPaperNotes,
     createPaperNote,
@@ -6,6 +6,37 @@ import {
     deletePaperNote,
 } from "../../services/notebookApi";
 import "./PaperNotebookPanel.css";
+
+/**
+ * Format relative / compact date for research note cards
+ */
+function formatNoteDate(dateStr) {
+    if (!dateStr) return "";
+    try {
+        const d = new Date(dateStr);
+        if (isNaN(d.getTime())) return "";
+        const now = new Date();
+        const diffMs = now - d;
+        const diffMins = Math.floor(diffMs / (1000 * 60));
+        const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+        if (diffMins < 1) return "Just now";
+        if (diffMins < 60) return `${diffMins}m ago`;
+        if (diffHours < 24 && now.getDate() === d.getDate()) {
+            return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+        }
+        if (diffDays === 1 || (diffHours < 48 && now.getDate() - d.getDate() === 1)) {
+            return "Yesterday";
+        }
+        if (diffDays < 7) {
+            return d.toLocaleDateString([], { weekday: "short" });
+        }
+        return d.toLocaleDateString([], { month: "short", day: "numeric" });
+    } catch {
+        return "";
+    }
+}
 
 const PaperNotebookPanel = ({
     isOpen,
@@ -21,6 +52,7 @@ const PaperNotebookPanel = ({
     const [notes, setNotes] = useState([]);
     const [loadingNotes, setLoadingNotes] = useState(false);
     const [listError, setListError] = useState("");
+    const [searchQuery, setSearchQuery] = useState("");
 
     // Active note editor state
     const [activeNote, setActiveNote] = useState(null); // null if draft/new, or existing note object
@@ -34,9 +66,12 @@ const PaperNotebookPanel = ({
     const [saveStatus, setSaveStatus] = useState("saved"); // 'saved' | 'saving' | 'unsaved' | 'error'
     const [saveError, setSaveError] = useState("");
 
+    // Responsive mobile view: 'list' | 'editor'
+    const [mobileView, setMobileView] = useState("list");
+
     // Confirmation dialog states
     const [showUnsavedModal, setShowUnsavedModal] = useState(false);
-    const [pendingAction, setPendingAction] = useState(null); // action callback or object to execute after confirm
+    const [pendingAction, setPendingAction] = useState(null);
 
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [noteToDelete, setNoteToDelete] = useState(null);
@@ -51,7 +86,6 @@ const PaperNotebookPanel = ({
         if (currentPaper && currentPaper.id) {
             setSelectedPaperId(currentPaper.id);
         } else if (papers && papers.length > 0) {
-            // Keep current selection if still valid, else pick first paper
             setSelectedPaperId((prev) => {
                 const exists = papers.some((p) => String(p.id) === String(prev));
                 return exists ? prev : papers[0].id;
@@ -196,7 +230,10 @@ const PaperNotebookPanel = ({
 
     // Switch note with guard
     const handleSelectNote = (note) => {
-        if (activeNote && activeNote.id === note.id) return;
+        if (activeNote && activeNote.id === note.id) {
+            setMobileView("editor");
+            return;
+        }
         performGuardedAction(() => {
             setActiveNote(note);
             setTitle(note.title || "Untitled note");
@@ -205,6 +242,7 @@ const PaperNotebookPanel = ({
             setSavedContent(note.content || "");
             setSaveStatus("saved");
             setSaveError("");
+            setMobileView("editor");
         });
     };
 
@@ -212,10 +250,20 @@ const PaperNotebookPanel = ({
     const handleNewNoteClick = () => {
         performGuardedAction(() => {
             initNewDraft();
-            if (titleInputRef.current) {
-                titleInputRef.current.focus();
-                titleInputRef.current.select();
-            }
+            setMobileView("editor");
+            setTimeout(() => {
+                if (titleInputRef.current) {
+                    titleInputRef.current.focus();
+                    titleInputRef.current.select();
+                }
+            }, 50);
+        });
+    };
+
+    // Mobile back to notes list action with guard
+    const handleMobileBackToList = () => {
+        performGuardedAction(() => {
+            setMobileView("list");
         });
     };
 
@@ -237,11 +285,9 @@ const PaperNotebookPanel = ({
                 setPendingAction(null);
             }
         }
-        // If save failed, modal stays open with error shown and content preserved
     };
 
     const handleUnsavedModalDiscard = () => {
-        // Discard local changes and reset to saved state
         setTitle(savedTitle);
         setContent(savedContent);
         setSaveStatus("saved");
@@ -296,6 +342,9 @@ const PaperNotebookPanel = ({
 
             setShowDeleteModal(false);
             setNoteToDelete(null);
+            if (window.innerWidth <= 768) {
+                setMobileView("list");
+            }
         } catch (err) {
             console.error("Failed to delete note:", err);
             setDeleteError(
@@ -311,7 +360,7 @@ const PaperNotebookPanel = ({
     useEffect(() => {
         handleSaveNoteRef.current = handleSaveNote;
         handleCloseRef.current = handleClose;
-    }, [handleSaveNote, handleClose]);
+    });
 
     // Keyboard shortcut: Ctrl+S / Cmd+S to save, Escape to close
     useEffect(() => {
@@ -336,10 +385,22 @@ const PaperNotebookPanel = ({
         return () => window.removeEventListener("keydown", handleKeyDown);
     }, [isOpen, showUnsavedModal, showDeleteModal]);
 
+    // Client-side search filtering
+    const filteredNotes = useMemo(() => {
+        if (!searchQuery.trim()) return notes;
+        const q = searchQuery.toLowerCase().trim();
+        return notes.filter((note) => {
+            const titleMatch = (note.title || "").toLowerCase().includes(q);
+            const contentMatch = (note.content || "").toLowerCase().includes(q);
+            return titleMatch || contentMatch;
+        });
+    }, [notes, searchQuery]);
+
     if (!isOpen) return null;
 
     const hasPapers = papers && papers.length > 0;
-    const currentPaperObject = papers.find((p) => String(p.id) === String(selectedPaperId)) || currentPaper;
+    const currentPaperObject =
+        papers.find((p) => String(p.id) === String(selectedPaperId)) || currentPaper;
 
     return (
         <div className="nforge-notebook-overlay animate-fade-in" onClick={handleClose}>
@@ -347,40 +408,70 @@ const PaperNotebookPanel = ({
                 className="nforge-notebook-panel animate-slide-left"
                 onClick={(e) => e.stopPropagation()}
                 role="dialog"
-                aria-label="Research Paper Notebook"
+                aria-label="Research Notebook"
             >
-                {/* Panel Header */}
+                {/* 1. Compact Header */}
                 <header className="notebook-panel-header">
                     <div className="notebook-header-left">
+                        {/* Mobile back button when viewing editor */}
+                        {mobileView === "editor" && (
+                            <button
+                                type="button"
+                                className="notebook-mobile-back-btn"
+                                onClick={handleMobileBackToList}
+                                title="Back to Notes list"
+                                aria-label="Back to Notes"
+                            >
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                    <polyline points="15 18 9 12 15 6"></polyline>
+                                </svg>
+                                <span>Notes</span>
+                            </button>
+                        )}
+
                         <div className="notebook-header-icon" aria-hidden="true">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
                                 <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
                                 <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
                                 <line x1="8" y1="7" x2="16" y2="7"></line>
                                 <line x1="8" y1="11" x2="14" y2="11"></line>
                             </svg>
                         </div>
-                        <div>
-                            <h2 className="notebook-header-title">Paper Notebook</h2>
-                            <p className="notebook-header-sub">Private notes & research observations</p>
+
+                        <div className="notebook-header-titles">
+                            <h2 className="notebook-header-title">Research Notebook</h2>
+                            {currentPaperObject?.title && (
+                                <span className="notebook-header-paper-tag" title={currentPaperObject.title}>
+                                    {currentPaperObject.title}
+                                </span>
+                            )}
                         </div>
                     </div>
 
-                    <button
-                        type="button"
-                        className="notebook-close-btn"
-                        onClick={handleClose}
-                        title="Close Notebook (Esc)"
-                        aria-label="Close Notebook"
-                    >
-                        &times;
-                    </button>
+                    <div className="notebook-header-right">
+                        <button
+                            type="button"
+                            className="notebook-close-btn"
+                            onClick={handleClose}
+                            title="Close Notebook (Esc)"
+                            aria-label="Close Notebook"
+                        >
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <line x1="18" y1="6" x2="6" y2="18"></line>
+                                <line x1="6" y1="6" x2="18" y2="18"></line>
+                            </svg>
+                        </button>
+                    </div>
                 </header>
 
-                {/* Paper Selector (Multi-paper sessions in Research Workspace) */}
+                {/* Multi-paper Selector (Research Workspace sessions with multiple papers) */}
                 {hasPapers && papers.length > 1 && (
                     <div className="notebook-paper-selector-bar">
                         <label htmlFor="notebook-paper-select" className="notebook-selector-label">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                <polyline points="14 2 14 8 20 8"></polyline>
+                            </svg>
                             Paper:
                         </label>
                         <select
@@ -398,18 +489,7 @@ const PaperNotebookPanel = ({
                     </div>
                 )}
 
-                {/* Single Paper Title Badge */}
-                {hasPapers && papers.length === 1 && currentPaperObject && (
-                    <div className="notebook-single-paper-badge" title={currentPaperObject.title}>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                            <polyline points="14 2 14 8 20 8"></polyline>
-                        </svg>
-                        <span className="single-paper-name">{currentPaperObject.title}</span>
-                    </div>
-                )}
-
-                {/* Content Container */}
+                {/* Main Content Area */}
                 {!hasPapers ? (
                     <div className="notebook-empty-view">
                         <div className="notebook-empty-icon" aria-hidden="true">
@@ -425,16 +505,14 @@ const PaperNotebookPanel = ({
                         </p>
                     </div>
                 ) : (
-                    <div className="notebook-body-container">
-                        {/* Notes Sidebar / List */}
-                        <div className="notebook-notes-list-section">
-                            <div className="notebook-notes-list-header">
-                                <span className="notes-count-label">
-                                    {notes.length} {notes.length === 1 ? "Note" : "Notes"}
-                                </span>
+                    <div className={`notebook-two-column-body mobile-view-${mobileView}`}>
+                        {/* 2. Left Column: Saved Notes List (220-250px) */}
+                        <aside className="notebook-notes-sidebar">
+                            {/* Search and New Note Toolbar */}
+                            <div className="notebook-sidebar-toolbar">
                                 <button
                                     type="button"
-                                    className="notebook-new-btn"
+                                    className="notebook-new-note-btn"
                                     onClick={handleNewNoteClick}
                                     title="Create a new note"
                                 >
@@ -442,73 +520,171 @@ const PaperNotebookPanel = ({
                                         <line x1="12" y1="5" x2="12" y2="19"></line>
                                         <line x1="5" y1="12" x2="19" y2="12"></line>
                                     </svg>
-                                    New Note
+                                    <span>New Note</span>
                                 </button>
+
+                                <div className="notebook-search-wrapper">
+                                    <svg className="notebook-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <circle cx="11" cy="11" r="8"></circle>
+                                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                    </svg>
+                                    <input
+                                        type="text"
+                                        className="notebook-search-input"
+                                        placeholder="Search notes..."
+                                        value={searchQuery}
+                                        onChange={(e) => setSearchQuery(e.target.value)}
+                                        aria-label="Search notes"
+                                    />
+                                    {searchQuery && (
+                                        <button
+                                            type="button"
+                                            className="notebook-search-clear"
+                                            onClick={() => setSearchQuery("")}
+                                            title="Clear search"
+                                        >
+                                            ✕
+                                        </button>
+                                    )}
+                                </div>
                             </div>
 
-                            {listError && (
-                                <div className="notebook-alert notebook-alert-error">
-                                    {listError}
-                                </div>
-                            )}
+                            {/* Notes List Content */}
+                            <div className="notebook-notes-list-scroll">
+                                {listError && (
+                                    <div className="notebook-sidebar-alert error">
+                                        {listError}
+                                    </div>
+                                )}
 
-                            {loadingNotes ? (
-                                <div className="notebook-loading-box">
-                                    <span className="notebook-spinner" aria-hidden="true"></span>
-                                    <span>Loading notes...</span>
-                                </div>
-                            ) : notes.length === 0 ? (
-                                <div className="notebook-no-notes">
-                                    <p>No notes for this paper yet.</p>
-                                    <button
-                                        type="button"
-                                        className="notebook-btn-link"
-                                        onClick={handleNewNoteClick}
-                                    >
-                                        + Start your first note
-                                    </button>
-                                </div>
-                            ) : (
-                                <ul className="notebook-notes-list" role="list">
-                                    {notes.map((note) => {
-                                        const isActive = activeNote && activeNote.id === note.id;
-                                        return (
-                                            <li
-                                                key={note.id}
-                                                className={`notebook-note-item ${isActive ? "active" : ""}`}
-                                                onClick={() => handleSelectNote(note)}
-                                            >
-                                                <div className="note-item-content">
-                                                    <h4 className="note-item-title">
-                                                        {note.title || "Untitled note"}
-                                                    </h4>
-                                                    <p className="note-item-snippet">
-                                                        {note.content ? note.content.slice(0, 60) : "No content"}
+                                {loadingNotes ? (
+                                    <div className="notebook-sidebar-loading">
+                                        <span className="notebook-spinner" aria-hidden="true"></span>
+                                        <span>Loading notes...</span>
+                                    </div>
+                                ) : notes.length === 0 ? (
+                                    <div className="notebook-sidebar-empty">
+                                        <p>No notes for this paper yet.</p>
+                                        <button
+                                            type="button"
+                                            className="notebook-create-first-btn"
+                                            onClick={handleNewNoteClick}
+                                        >
+                                            + Start your first note
+                                        </button>
+                                    </div>
+                                ) : filteredNotes.length === 0 ? (
+                                    <div className="notebook-sidebar-empty">
+                                        <p>No notes match "{searchQuery}"</p>
+                                        <button
+                                            type="button"
+                                            className="notebook-link-btn"
+                                            onClick={() => setSearchQuery("")}
+                                        >
+                                            Clear filter
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="notebook-notes-items" role="list">
+                                        {filteredNotes.map((note) => {
+                                            const isActive = activeNote && activeNote.id === note.id;
+                                            const formattedDate = formatNoteDate(note.updated_at || note.created_at);
+
+                                            return (
+                                                <div
+                                                    key={note.id}
+                                                    role="listitem"
+                                                    className={`notebook-note-card ${isActive ? "active" : ""}`}
+                                                    onClick={() => handleSelectNote(note)}
+                                                    tabIndex={0}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === "Enter" || e.key === " ") {
+                                                            e.preventDefault();
+                                                            handleSelectNote(note);
+                                                        }
+                                                    }}
+                                                >
+                                                    <div className="note-card-header">
+                                                        <h4 className="note-card-title">
+                                                            {note.title || "Untitled note"}
+                                                        </h4>
+                                                        {formattedDate && (
+                                                            <span className="note-card-date">
+                                                                {formattedDate}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <p className="note-card-snippet">
+                                                        {note.content
+                                                            ? note.content.slice(0, 80)
+                                                            : "Empty note..."}
                                                     </p>
                                                 </div>
-                                                <button
-                                                    type="button"
-                                                    className="note-item-delete-btn"
-                                                    onClick={(e) => confirmDeleteNote(note, e)}
-                                                    title="Delete this note"
-                                                    aria-label={`Delete note ${note.title}`}
-                                                >
-                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                        <polyline points="3 6 5 6 21 6"></polyline>
-                                                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                                                    </svg>
-                                                </button>
-                                            </li>
-                                        );
-                                    })}
-                                </ul>
-                            )}
-                        </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                        </aside>
 
-                        {/* Note Editor Section */}
-                        <div className="notebook-editor-section">
-                            {/* Editor Status & Action Bar */}
-                            <div className="notebook-editor-bar">
+                        {/* 3. Right Column: Note Editor */}
+                        <main className="notebook-editor-main">
+                            <div className="notebook-editor-scroll-area">
+                                {saveError && (
+                                    <div className="notebook-alert notebook-alert-error animate-fade-in">
+                                        <span>{saveError}</span>
+                                        <button
+                                            type="button"
+                                            className="notebook-alert-dismiss"
+                                            onClick={() => setSaveError("")}
+                                        >
+                                            ✕
+                                        </button>
+                                    </div>
+                                )}
+
+                                {/* Note Title & Character Counter */}
+                                <div className="notebook-title-bar">
+                                    <input
+                                        ref={titleInputRef}
+                                        type="text"
+                                        className="notebook-title-input"
+                                        placeholder="Note title..."
+                                        value={title}
+                                        onChange={(e) => {
+                                            setTitle(e.target.value);
+                                            if (saveError) setSaveError("");
+                                        }}
+                                        maxLength={200}
+                                        aria-label="Note Title"
+                                    />
+                                    <span
+                                        className={`notebook-char-counter ${title.length >= 190 ? "warning" : ""}`}
+                                        title={`${title.length} of 200 characters`}
+                                    >
+                                        {title.length}/200
+                                    </span>
+                                </div>
+
+                                {/* Multiline Writing Area */}
+                                <div className="notebook-textarea-wrapper">
+                                    <textarea
+                                        ref={contentTextareaRef}
+                                        className="notebook-content-textarea"
+                                        placeholder="Type your research notes, findings, equations, hypotheses, or annotations here..."
+                                        value={content}
+                                        onChange={(e) => {
+                                            setContent(e.target.value);
+                                            if (saveError) setSaveError("");
+                                        }}
+                                        spellCheck="false"
+                                        aria-label="Note Content"
+                                    />
+                                </div>
+                            </div>
+
+                            {/* 4. Persistent Bottom Action Bar */}
+                            <footer className="notebook-bottom-bar">
                                 <div className="notebook-status-indicator">
                                     {saveStatus === "saving" ? (
                                         <span className="status-badge saving">
@@ -517,6 +693,7 @@ const PaperNotebookPanel = ({
                                         </span>
                                     ) : saveStatus === "error" ? (
                                         <span className="status-badge error" title={saveError}>
+                                            <span className="status-dot dot-error" aria-hidden="true"></span>
                                             Save Failed
                                         </span>
                                     ) : isDirty ? (
@@ -532,18 +709,24 @@ const PaperNotebookPanel = ({
                                     )}
                                 </div>
 
-                                <div className="notebook-editor-actions">
+                                <div className="notebook-bottom-actions">
+                                    <span className="notebook-shortcut-hint">
+                                        <kbd>Ctrl+S</kbd> to save
+                                    </span>
+
                                     {activeNote && activeNote.id && (
                                         <button
                                             type="button"
-                                            className="notebook-action-icon-btn danger"
+                                            className="notebook-delete-btn"
                                             onClick={(e) => confirmDeleteNote(activeNote, e)}
-                                            title="Delete note"
+                                            title="Delete this note"
+                                            aria-label="Delete note"
                                         >
-                                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                                 <polyline points="3 6 5 6 21 6"></polyline>
                                                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                                             </svg>
+                                            <span>Delete Note</span>
                                         </button>
                                     )}
 
@@ -557,65 +740,13 @@ const PaperNotebookPanel = ({
                                         {saveStatus === "saving" ? "Saving..." : "Save Note"}
                                     </button>
                                 </div>
-                            </div>
-
-                            {saveError && (
-                                <div className="notebook-alert notebook-alert-error animate-fade-in">
-                                    <span>{saveError}</span>
-                                    <button
-                                        type="button"
-                                        className="notebook-alert-dismiss"
-                                        onClick={() => setSaveError("")}
-                                    >
-                                        ✕
-                                    </button>
-                                </div>
-                            )}
-
-                            {/* Note Title Input */}
-                            <div className="notebook-title-row">
-                                <input
-                                    ref={titleInputRef}
-                                    type="text"
-                                    className="notebook-title-input"
-                                    placeholder="Note title..."
-                                    value={title}
-                                    onChange={(e) => {
-                                        setTitle(e.target.value);
-                                        if (saveError) setSaveError("");
-                                    }}
-                                    maxLength={200}
-                                />
-                                <span className="notebook-title-counter">
-                                    {title.length}/200
-                                </span>
-                            </div>
-
-                            {/* Note Content Textarea */}
-                            <div className="notebook-textarea-wrapper">
-                                <textarea
-                                    ref={contentTextareaRef}
-                                    className="notebook-content-textarea"
-                                    placeholder="Write your research notes, findings, equations, or annotations here..."
-                                    value={content}
-                                    onChange={(e) => {
-                                        setContent(e.target.value);
-                                        if (saveError) setSaveError("");
-                                    }}
-                                />
-                            </div>
-
-                            <footer className="notebook-editor-footer">
-                                <span className="notebook-keyboard-hint">
-                                    Tip: Press <kbd>Ctrl+S</kbd> to save anytime
-                                </span>
                             </footer>
-                        </div>
+                        </main>
                     </div>
                 )}
             </aside>
 
-            {/* UNSAVED CHANGES MODAL */}
+            {/* UNSAVED CHANGES CONFIRMATION DIALOG */}
             {showUnsavedModal && (
                 <div
                     className="notebook-modal-backdrop animate-fade-in"
@@ -679,7 +810,7 @@ const PaperNotebookPanel = ({
                 </div>
             )}
 
-            {/* DELETE NOTE CONFIRMATION MODAL */}
+            {/* DELETE NOTE CONFIRMATION DIALOG */}
             {showDeleteModal && (
                 <div
                     className="notebook-modal-backdrop animate-fade-in"

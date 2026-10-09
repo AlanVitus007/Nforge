@@ -376,6 +376,7 @@ function ResearchWorkspace() {
 
     // Paper-Specific Notebook state
     const [isNotebookOpen, setIsNotebookOpen] = useState(false);
+    const [notebookNotesCount, setNotebookNotesCount] = useState(0);
 
     // Live Multi-Paper Session Research Chat State
     const [questionText, setQuestionText] = useState('');
@@ -2178,6 +2179,7 @@ function ResearchWorkspace() {
             <NotebookButton
                 isOpen={isNotebookOpen}
                 onClick={() => setIsNotebookOpen((prev) => !prev)}
+                notesCount={notebookNotesCount}
             />
 
             {/* Paper-Specific Notebook Panel */}
@@ -2185,6 +2187,7 @@ function ResearchWorkspace() {
                 isOpen={isNotebookOpen}
                 onClose={() => setIsNotebookOpen(false)}
                 papers={activeSession?.papers || []}
+                onNotesCountChange={setNotebookNotesCount}
             />
         </div>
     );
