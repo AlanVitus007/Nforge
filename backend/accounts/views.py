@@ -6,7 +6,7 @@ from rest_framework.authtoken.models import Token
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 from django.db.models import Q
-from .serializers import UserSerializer, UserProfileSerializer, RegisterSerializer
+from .serializers import UserSerializer, UserProfileSerializer, UserProfileUpdateSerializer, RegisterSerializer
 
 class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
@@ -79,14 +79,12 @@ class TestProtectedView(APIView):
 class UserProfileView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def get(self, request):
-        user = request.user
-        serializer = UserProfileSerializer(user)
-        data = dict(serializer.data)
-
-        # Calculate project counts and friends counts cleanly
+    def _get_profile_data(self, user):
         from projects.models import Project, ProjectMember
         from .models import Friendship
+
+        serializer = UserProfileSerializer(user)
+        data = dict(serializer.data)
 
         owned_count = Project.objects.filter(owner=user).count()
         member_count = ProjectMember.objects.filter(user=user).exclude(project__owner=user).count()
@@ -98,6 +96,45 @@ class UserProfileView(APIView):
 
         data["projects_count"] = total_projects
         data["friends_count"] = friends_count
+        return data
 
+    def get(self, request):
+        data = self._get_profile_data(request.user)
         return Response(data)
+
+    def patch(self, request):
+        return self._update_profile(request, partial=True)
+
+    def put(self, request):
+        return self._update_profile(request, partial=False)
+
+    def _update_profile(self, request, partial=False):
+        if not isinstance(request.data, dict):
+            return Response({"error": "Invalid request body."}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user
+
+        # Prevent attempts to tamper with or modify another user's profile
+        target_id = request.data.get('id') or request.data.get('user_id')
+        if target_id is not None and str(target_id) != str(user.id):
+            return Response(
+                {"error": "You cannot modify another user's profile."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        target_username = request.data.get('target_username')
+        if target_username is not None and target_username != user.username:
+            return Response(
+                {"error": "You cannot modify another user's profile."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        serializer = UserProfileUpdateSerializer(user, data=request.data, partial=partial)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        updated_user = serializer.save()
+        data = self._get_profile_data(updated_user)
+        data["message"] = "Profile updated successfully."
+        return Response(data, status=status.HTTP_200_OK)
 

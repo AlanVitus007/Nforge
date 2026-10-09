@@ -1,3 +1,4 @@
+import re
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -16,6 +17,85 @@ class UserProfileSerializer(serializers.ModelSerializer):
         model = User
         fields = ('id', 'username', 'email', 'first_name', 'last_name', 'date_joined', 'is_active', 'is_staff', 'is_superuser')
         read_only_fields = ('id', 'date_joined', 'is_active', 'is_staff', 'is_superuser')
+
+class UserProfileUpdateSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(
+        min_length=3,
+        max_length=150,
+        required=True,
+        error_messages={
+            'blank': 'Username is required.',
+            'required': 'Username is required.',
+            'min_length': 'Username must be at least 3 characters long.',
+            'max_length': 'Username cannot exceed 150 characters.',
+        }
+    )
+
+    class Meta:
+        model = User
+        fields = ('id', 'username', 'email', 'first_name', 'last_name', 'is_staff', 'is_superuser')
+        read_only_fields = ('id', 'email', 'first_name', 'last_name', 'is_staff', 'is_superuser')
+
+    def validate_username(self, value):
+        cleaned = value.strip()
+        if not cleaned:
+            raise serializers.ValidationError('Username is required.')
+        if len(cleaned) < 3:
+            raise serializers.ValidationError('Username must be at least 3 characters long.')
+        if len(cleaned) > 150:
+            raise serializers.ValidationError('Username cannot exceed 150 characters.')
+
+        if not re.match(r'^[a-zA-Z0-9_.-]+$', cleaned):
+            raise serializers.ValidationError(
+                'Enter a valid username. Allowed characters are letters, numbers, and ./_/-.'
+            )
+
+        instance = getattr(self, 'instance', None)
+        qs = User.objects.filter(username__iexact=cleaned)
+        if instance:
+            qs = qs.exclude(pk=instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError('A user with this username already exists.')
+
+        return cleaned
+
+    def validate(self, attrs):
+        instance = getattr(self, 'instance', None)
+        raw_data = self.initial_data
+        errors = {}
+
+        if instance and isinstance(raw_data, dict):
+            # Explicitly reject attempts to change protected fields
+            if 'first_name' in raw_data and raw_data['first_name'] != instance.first_name:
+                errors['first_name'] = 'First name cannot be changed through the profile endpoint.'
+
+            if 'last_name' in raw_data and raw_data['last_name'] != instance.last_name:
+                errors['last_name'] = 'Last name cannot be changed through the profile endpoint.'
+
+            if 'email' in raw_data and str(raw_data['email']).strip().lower() != instance.email.lower():
+                errors['email'] = 'Email address cannot be changed through the profile endpoint.'
+
+            if 'is_staff' in raw_data and bool(raw_data['is_staff']) != instance.is_staff:
+                errors['is_staff'] = 'Staff privileges cannot be modified.'
+
+            if 'is_superuser' in raw_data and bool(raw_data['is_superuser']) != instance.is_superuser:
+                errors['is_superuser'] = 'Superuser privileges cannot be modified.'
+
+            if 'password' in raw_data:
+                errors['password'] = 'Password cannot be changed through the profile endpoint.'
+
+            if 'id' in raw_data and str(raw_data['id']) != str(instance.id):
+                errors['id'] = 'User ID cannot be modified.'
+
+        if errors:
+            raise serializers.ValidationError(errors)
+
+        return attrs
+
+    def update(self, instance, validated_data):
+        instance.username = validated_data.get('username', instance.username)
+        instance.save(update_fields=['username'])
+        return instance
 
 class RegisterSerializer(serializers.ModelSerializer):
     first_name = serializers.CharField(

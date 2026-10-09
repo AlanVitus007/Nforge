@@ -539,20 +539,33 @@ class FriendshipSystemTests(TestCase):
 class UserProfileEndpointTests(TestCase):
     def setUp(self):
         self.client = APIClient()
+        self.raw_password = "StrongPassword123!"
         self.user = User.objects.create_user(
             username="profile_researcher",
             email="researcher@example.com",
-            password="StrongPassword123!",
+            password=self.raw_password,
             first_name="Jane",
             last_name="Doe",
         )
         self.token = Token.objects.create(user=self.user)
 
+        self.other_user = User.objects.create_user(
+            username="other_researcher",
+            email="other@example.com",
+            password="OtherPassword123!",
+            first_name="John",
+            last_name="Smith",
+        )
+        self.other_token = Token.objects.create(user=self.other_user)
+
     def test_unauthenticated_profile_access_rejected(self):
-        res = self.client.get("/api/auth/profile/")
-        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+        """Unauthenticated GET, PATCH, and PUT requests to profile endpoint are rejected with 401."""
+        for method in ['get', 'patch', 'put']:
+            res = getattr(self.client, method)("/api/auth/profile/", {"username": "new_name"}, format="json")
+            self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_authenticated_profile_returns_safe_data(self):
+        """GET /api/auth/profile/ returns profile details without password or tokens."""
         self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token.key}")
         res = self.client.get("/api/auth/profile/")
         self.assertEqual(res.status_code, status.HTTP_200_OK)
@@ -566,6 +579,226 @@ class UserProfileEndpointTests(TestCase):
         self.assertIn("friends_count", res.data)
         self.assertNotIn("password", res.data)
         self.assertNotIn("token", res.data)
+
+    def test_successful_username_change_via_patch_and_put(self):
+        """Authenticated user can update their username via PATCH and PUT."""
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token.key}")
+
+        # 1. Update via PATCH
+        res_patch = self.client.patch(
+            "/api/auth/profile/",
+            {"username": "jane_researcher"},
+            format="json"
+        )
+        self.assertEqual(res_patch.status_code, status.HTTP_200_OK)
+        self.assertEqual(res_patch.data["username"], "jane_researcher")
+        self.assertEqual(res_patch.data["first_name"], "Jane")
+        self.assertEqual(res_patch.data["last_name"], "Doe")
+        self.assertEqual(res_patch.data["email"], "researcher@example.com")
+
+        # Verify DB updated
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, "jane_researcher")
+
+        # 2. Update via PUT
+        res_put = self.client.put(
+            "/api/auth/profile/",
+            {"username": "jane_curie"},
+            format="json"
+        )
+        self.assertEqual(res_put.status_code, status.HTTP_200_OK)
+        self.assertEqual(res_put.data["username"], "jane_curie")
+
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, "jane_curie")
+
+    def test_duplicate_username_rejected(self):
+        """Attempting to change username to an already existing username is rejected."""
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token.key}")
+
+        # Exact match duplicate
+        res = self.client.patch(
+            "/api/auth/profile/",
+            {"username": "other_researcher"},
+            format="json"
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("username", res.data)
+
+        # Case-insensitive duplicate
+        res_case = self.client.patch(
+            "/api/auth/profile/",
+            {"username": "OTHER_RESEARCHER"},
+            format="json"
+        )
+        self.assertEqual(res_case.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("username", res_case.data)
+
+        # Verify DB unchanged
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, "profile_researcher")
+
+    def test_invalid_username_rejected(self):
+        """Invalid username length, format, or blank characters are rejected."""
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token.key}")
+
+        invalid_cases = [
+            "",
+            "   ",
+            "ab",  # Less than 3 chars
+            "user with spaces",
+            "user@name!",
+            "invalid#char",
+        ]
+
+        for bad_username in invalid_cases:
+            res = self.client.patch(
+                "/api/auth/profile/",
+                {"username": bad_username},
+                format="json"
+            )
+            self.assertEqual(
+                res.status_code,
+                status.HTTP_400_BAD_REQUEST,
+                f"Username '{bad_username}' should be rejected with 400"
+            )
+            self.assertIn("username", res.data)
+
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, "profile_researcher")
+
+    def test_first_name_last_name_and_email_cannot_be_changed(self):
+        """Attempts to change first_name, last_name, or email via profile update return explicit validation errors."""
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token.key}")
+
+        # Attempt to change first_name
+        res_first = self.client.patch(
+            "/api/auth/profile/",
+            {"first_name": "HackedName"},
+            format="json"
+        )
+        self.assertEqual(res_first.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("first_name", res_first.data)
+
+        # Attempt to change last_name
+        res_last = self.client.patch(
+            "/api/auth/profile/",
+            {"last_name": "HackedLastName"},
+            format="json"
+        )
+        self.assertEqual(res_last.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("last_name", res_last.data)
+
+        # Attempt to change email
+        res_email = self.client.patch(
+            "/api/auth/profile/",
+            {"email": "different_email@evil.com"},
+            format="json"
+        )
+        self.assertEqual(res_email.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("email", res_email.data)
+
+        # Verify DB values were not altered
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.first_name, "Jane")
+        self.assertEqual(self.user.last_name, "Doe")
+        self.assertEqual(self.user.email, "researcher@example.com")
+
+    def test_staff_and_superuser_privileges_cannot_be_modified(self):
+        """Attempts to escalate privileges via profile update return explicit validation errors."""
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token.key}")
+
+        # Attempt to set is_staff=True
+        res_staff = self.client.patch(
+            "/api/auth/profile/",
+            {"is_staff": True},
+            format="json"
+        )
+        self.assertEqual(res_staff.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("is_staff", res_staff.data)
+
+        # Attempt to set is_superuser=True
+        res_super = self.client.patch(
+            "/api/auth/profile/",
+            {"is_superuser": True},
+            format="json"
+        )
+        self.assertEqual(res_super.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("is_superuser", res_super.data)
+
+        # Verify DB flags remain False
+        self.user.refresh_from_db()
+        self.assertFalse(self.user.is_staff)
+        self.assertFalse(self.user.is_superuser)
+
+    def test_user_cannot_modify_another_users_account(self):
+        """Users cannot supply another user's ID or target username to modify another account."""
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token.key}")
+
+        # Attempt to supply other user's id
+        res_id = self.client.patch(
+            "/api/auth/profile/",
+            {"id": self.other_user.id, "username": "victim_tampered"},
+            format="json"
+        )
+        self.assertEqual(res_id.status_code, status.HTTP_403_FORBIDDEN)
+
+        # Attempt to supply other user's user_id
+        res_user_id = self.client.patch(
+            "/api/auth/profile/",
+            {"user_id": self.other_user.id, "username": "victim_tampered"},
+            format="json"
+        )
+        self.assertEqual(res_user_id.status_code, status.HTTP_403_FORBIDDEN)
+
+        # Attempt to supply target_username
+        res_target = self.client.patch(
+            "/api/auth/profile/",
+            {"target_username": "other_researcher", "username": "victim_tampered"},
+            format="json"
+        )
+        self.assertEqual(res_target.status_code, status.HTTP_403_FORBIDDEN)
+
+        # Other user remains untouched
+        self.other_user.refresh_from_db()
+        self.assertEqual(self.other_user.username, "other_researcher")
+
+    def test_existing_login_and_token_authentication_still_work_after_username_change(self):
+        """After username change, existing token remains valid, and login works with new username and email."""
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {self.token.key}")
+
+        # 1. Update username
+        res_update = self.client.patch(
+            "/api/auth/profile/",
+            {"username": "jane_updated_login"},
+            format="json"
+        )
+        self.assertEqual(res_update.status_code, status.HTTP_200_OK)
+
+        # 2. Existing token still authenticates immediately
+        res_me = self.client.get("/api/auth/me/")
+        self.assertEqual(res_me.status_code, status.HTTP_200_OK)
+        self.assertEqual(res_me.data["username"], "jane_updated_login")
+
+        # 3. Can log in with the new username and original password
+        self.client.credentials()  # Clear auth header
+        res_new_login = self.client.post(
+            "/api/auth/login/",
+            {"username": "jane_updated_login", "password": self.raw_password},
+            format="json"
+        )
+        self.assertEqual(res_new_login.status_code, status.HTTP_200_OK)
+        self.assertEqual(res_new_login.data["user"]["username"], "jane_updated_login")
+        self.assertEqual(res_new_login.data["token"], self.token.key)
+
+        # 4. Can still log in with email and original password
+        res_email_login = self.client.post(
+            "/api/auth/login/",
+            {"username": "researcher@example.com", "password": self.raw_password},
+            format="json"
+        )
+        self.assertEqual(res_email_login.status_code, status.HTTP_200_OK)
+        self.assertEqual(res_email_login.data["user"]["username"], "jane_updated_login")
 
 
 class NForgeRegistrationAndAuthenticationTests(TestCase):
