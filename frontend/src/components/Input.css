@@ -43,6 +43,50 @@
   box-shadow: 0 0 0 1px var(--danger);
 }
 
+.input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.input-with-toggle {
+  padding-right: 2.5rem;
+}
+
+.input-password-toggle-btn {
+  position: absolute;
+  right: 0.625rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast);
+}
+
+.input-password-toggle-btn:hover {
+  color: var(--text-primary);
+}
+
+.required-star {
+  color: var(--danger);
+  font-weight: 700;
+  margin-left: 0.15rem;
+}
+
+.helper-text {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: -0.25rem;
+}
+
 .error-text {
   font-size: 0.75rem;
   color: var(--danger);

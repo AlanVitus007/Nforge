@@ -1,11 +1,14 @@
 from django.contrib.auth.models import User
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.validators import validate_email
 from rest_framework import serializers
 from .models import Friendship
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'is_staff', 'is_superuser')
+        fields = ('id', 'username', 'email', 'first_name', 'last_name', 'is_staff', 'is_superuser')
         read_only_fields = ('is_staff', 'is_superuser')
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -15,17 +18,126 @@ class UserProfileSerializer(serializers.ModelSerializer):
         read_only_fields = ('id', 'date_joined', 'is_active', 'is_staff', 'is_superuser')
 
 class RegisterSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True)
+    first_name = serializers.CharField(
+        max_length=150,
+        required=True,
+        error_messages={
+            'blank': 'First name is required.',
+            'required': 'First name is required.',
+        }
+    )
+    last_name = serializers.CharField(
+        max_length=150,
+        required=True,
+        error_messages={
+            'blank': 'Last name is required.',
+            'required': 'Last name is required.',
+        }
+    )
+    email = serializers.EmailField(
+        required=True,
+        error_messages={
+            'blank': 'Email address is required.',
+            'required': 'Email address is required.',
+            'invalid': 'Enter a valid email address.',
+        }
+    )
+    password = serializers.CharField(
+        write_only=True,
+        required=True,
+        style={'input_type': 'password'},
+        error_messages={
+            'blank': 'Password is required.',
+            'required': 'Password is required.',
+        }
+    )
+    confirm_password = serializers.CharField(
+        write_only=True,
+        required=True,
+        style={'input_type': 'password'},
+        error_messages={
+            'blank': 'Please confirm your password.',
+            'required': 'Please confirm your password.',
+        }
+    )
 
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'password')
+        fields = ('id', 'first_name', 'last_name', 'username', 'email', 'password', 'confirm_password')
+        extra_kwargs = {
+            'username': {
+                'error_messages': {
+                    'blank': 'Username is required.',
+                    'required': 'Username is required.',
+                }
+            }
+        }
+
+    def validate_first_name(self, value):
+        cleaned = value.strip()
+        if not cleaned:
+            raise serializers.ValidationError('First name is required.')
+        return cleaned
+
+    def validate_last_name(self, value):
+        cleaned = value.strip()
+        if not cleaned:
+            raise serializers.ValidationError('Last name is required.')
+        return cleaned
+
+    def validate_username(self, value):
+        cleaned = value.strip()
+        if not cleaned:
+            raise serializers.ValidationError('Username is required.')
+        if User.objects.filter(username__iexact=cleaned).exists():
+            raise serializers.ValidationError('A user with this username already exists.')
+        return cleaned
+
+    def validate_email(self, value):
+        cleaned = value.strip().lower()
+        if not cleaned:
+            raise serializers.ValidationError('Email address is required.')
+        try:
+            validate_email(cleaned)
+        except DjangoValidationError:
+            raise serializers.ValidationError('Enter a valid email address.')
+        if User.objects.filter(email__iexact=cleaned).exists():
+            raise serializers.ValidationError('A user with this email address already exists.')
+        return cleaned
+
+    def validate(self, attrs):
+        password = attrs.get('password')
+        confirm_password = attrs.get('confirm_password')
+
+        if password and confirm_password:
+            if password != confirm_password:
+                raise serializers.ValidationError({'confirm_password': 'Passwords do not match.'})
+
+            if len(password) < 8:
+                raise serializers.ValidationError({'password': 'Password must be at least 8 characters long.'})
+
+            try:
+                validate_password(password)
+            except DjangoValidationError as err:
+                raise serializers.ValidationError({'password': list(err.messages)})
+
+        # Explicitly disallow any injected privilege escalation fields
+        attrs.pop('is_staff', None)
+        attrs.pop('is_superuser', None)
+
+        return attrs
 
     def create(self, validated_data):
+        validated_data.pop('confirm_password', None)
+        validated_data.pop('is_staff', None)
+        validated_data.pop('is_superuser', None)
+
         user = User.objects.create_user(
             username=validated_data['username'],
-            email=validated_data.get('email', ''),
-            password=validated_data['password']
+            email=validated_data['email'],
+            password=validated_data['password'],
+            first_name=validated_data['first_name'],
+            last_name=validated_data['last_name'],
         )
         return user
 

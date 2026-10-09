@@ -257,9 +257,12 @@ class NForgeAuthenticationSecurityTests(TestCase):
         must be ignored; created accounts must remain normal unprivileged users.
         """
         payload = {
+            "first_name": "Hacker",
+            "last_name": "Attempt",
             "username": "hacker_attempt",
             "email": "hacker@example.com",
             "password": "HackerPassword123!",
+            "confirm_password": "HackerPassword123!",
             "is_staff": True,
             "is_superuser": True,
         }
@@ -333,7 +336,14 @@ class NForgeAuthenticationSecurityTests(TestCase):
         # 2. Registration response
         res_reg = self.client.post(
             "/api/auth/register/",
-            {"username": "new_student", "email": "new@example.com", "password": "SecretPassword123!"},
+            {
+                "first_name": "New",
+                "last_name": "Student",
+                "username": "new_student",
+                "email": "new@example.com",
+                "password": "SecretPassword123!",
+                "confirm_password": "SecretPassword123!",
+            },
             format="json",
         )
         self.assertEqual(res_reg.status_code, status.HTTP_201_CREATED)
@@ -556,4 +566,164 @@ class UserProfileEndpointTests(TestCase):
         self.assertIn("friends_count", res.data)
         self.assertNotIn("password", res.data)
         self.assertNotIn("token", res.data)
+
+
+class NForgeRegistrationAndAuthenticationTests(TestCase):
+    """
+    Tests covering registration fields (first_name, last_name, username, email,
+    password, confirm_password), validation, duplicate username/email prevention,
+    privilege escalation defense, and sign-in via username or email.
+    """
+
+    def setUp(self):
+        self.client = APIClient()
+        self.valid_payload = {
+            "first_name": "Marie",
+            "last_name": "Curie",
+            "username": "marie_curie",
+            "email": "marie.curie@radium.org",
+            "password": "RadiumDiscovery123!",
+            "confirm_password": "RadiumDiscovery123!",
+        }
+
+    def test_successful_registration_with_all_required_fields(self):
+        """User registers with all required fields; name, email, and password hashing are verified."""
+        res = self.client.post("/api/auth/register/", self.valid_payload, format="json")
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(res.data["username"], "marie_curie")
+        self.assertEqual(res.data["email"], "marie.curie@radium.org")
+        self.assertEqual(res.data["first_name"], "Marie")
+        self.assertEqual(res.data["last_name"], "Curie")
+        self.assertNotIn("password", res.data)
+        self.assertNotIn("confirm_password", res.data)
+
+        # Verify DB entry
+        user = User.objects.get(username="marie_curie")
+        self.assertEqual(user.first_name, "Marie")
+        self.assertEqual(user.last_name, "Curie")
+        self.assertEqual(user.email, "marie.curie@radium.org")
+        self.assertTrue(user.check_password("RadiumDiscovery123!"))
+        self.assertNotEqual(user.password, "RadiumDiscovery123!")
+        self.assertTrue(is_password_usable(user.password))
+        self.assertFalse(user.is_staff)
+        self.assertFalse(user.is_superuser)
+
+    def test_registration_privilege_escalation_prevention(self):
+        """Privilege escalation fields (is_staff, is_superuser) in registration payload are rejected/ignored."""
+        payload = dict(self.valid_payload)
+        payload["is_staff"] = True
+        payload["is_superuser"] = True
+        res = self.client.post("/api/auth/register/", payload, format="json")
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+
+        user = User.objects.get(username="marie_curie")
+        self.assertFalse(user.is_staff)
+        self.assertFalse(user.is_superuser)
+
+    def test_registration_password_mismatch_fails(self):
+        """Mismatched confirm_password returns 400 Bad Request with field error."""
+        payload = dict(self.valid_payload)
+        payload["confirm_password"] = "DifferentPasswordXYZ999!"
+        res = self.client.post("/api/auth/register/", payload, format="json")
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("confirm_password", res.data)
+        self.assertFalse(User.objects.filter(username="marie_curie").exists())
+
+    def test_registration_missing_first_and_last_name_fails(self):
+        """Missing first or last name returns 400 Bad Request."""
+        payload = dict(self.valid_payload)
+        payload.pop("first_name")
+        res = self.client.post("/api/auth/register/", payload, format="json")
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("first_name", res.data)
+
+        payload2 = dict(self.valid_payload)
+        payload2.pop("last_name")
+        res2 = self.client.post("/api/auth/register/", payload2, format="json")
+        self.assertEqual(res2.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("last_name", res2.data)
+
+    def test_registration_blank_names_rejected(self):
+        """Whitespace-only names are rejected."""
+        payload = dict(self.valid_payload)
+        payload["first_name"] = "   "
+        res = self.client.post("/api/auth/register/", payload, format="json")
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("first_name", res.data)
+
+    def test_registration_invalid_email_format_rejected(self):
+        """Invalid email format returns 400 Bad Request."""
+        payload = dict(self.valid_payload)
+        payload["email"] = "not-an-email-address"
+        res = self.client.post("/api/auth/register/", payload, format="json")
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("email", res.data)
+
+    def test_registration_short_password_rejected(self):
+        """Passwords shorter than 8 characters are rejected."""
+        payload = dict(self.valid_payload)
+        payload["password"] = "short1!"
+        payload["confirm_password"] = "short1!"
+        res = self.client.post("/api/auth/register/", payload, format="json")
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("password", res.data)
+
+    def test_registration_duplicate_username_rejected(self):
+        """Duplicate username returns 400 Bad Request."""
+        self.client.post("/api/auth/register/", self.valid_payload, format="json")
+        payload2 = dict(self.valid_payload)
+        payload2["email"] = "different_email@lab.org"
+        res = self.client.post("/api/auth/register/", payload2, format="json")
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("username", res.data)
+
+    def test_registration_duplicate_email_rejected(self):
+        """Duplicate email (case-insensitive) returns 400 Bad Request."""
+        self.client.post("/api/auth/register/", self.valid_payload, format="json")
+        payload2 = dict(self.valid_payload)
+        payload2["username"] = "different_username"
+        payload2["email"] = "MARIE.CURIE@RADIUM.ORG"
+        res = self.client.post("/api/auth/register/", payload2, format="json")
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("email", res.data)
+
+    def test_sign_in_using_email_address_succeeds(self):
+        """Users can sign in using their email address instead of username."""
+        self.client.post("/api/auth/register/", self.valid_payload, format="json")
+
+        login_res = self.client.post(
+            "/api/auth/login/",
+            {"username": "marie.curie@radium.org", "password": "RadiumDiscovery123!"},
+            format="json",
+        )
+        self.assertEqual(login_res.status_code, status.HTTP_200_OK)
+        self.assertIn("token", login_res.data)
+        self.assertEqual(login_res.data["user"]["username"], "marie_curie")
+        self.assertEqual(login_res.data["user"]["first_name"], "Marie")
+        self.assertEqual(login_res.data["user"]["last_name"], "Curie")
+
+    def test_sign_in_using_email_address_case_insensitive(self):
+        """Email sign-in is case-insensitive."""
+        self.client.post("/api/auth/register/", self.valid_payload, format="json")
+
+        login_res = self.client.post(
+            "/api/auth/login/",
+            {"username": "MARIE.CURIE@RADIUM.ORG", "password": "RadiumDiscovery123!"},
+            format="json",
+        )
+        self.assertEqual(login_res.status_code, status.HTTP_200_OK)
+        self.assertIn("token", login_res.data)
+
+    def test_sign_in_using_email_invalid_password_fails(self):
+        """Email sign-in with wrong password returns 400 Bad Request."""
+        self.client.post("/api/auth/register/", self.valid_payload, format="json")
+
+        login_res = self.client.post(
+            "/api/auth/login/",
+            {"username": "marie.curie@radium.org", "password": "WrongPassword123!"},
+            format="json",
+        )
+        self.assertEqual(login_res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(login_res.data.get("error"), "Invalid Credentials")
+
 

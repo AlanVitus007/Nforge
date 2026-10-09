@@ -1,22 +1,44 @@
 import React, { useState, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { useNavigate, Link } from 'react-router-dom';
-import Card from '../components/Card';
 import Input from '../components/Input';
 import Button from '../components/Button';
+import './Auth.css';
 
 const Login = () => {
-    const [username, setUsername] = useState('');
+    const [identifier, setIdentifier] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
+    const [fieldErrors, setFieldErrors] = useState({});
+    const [submitting, setSubmitting] = useState(false);
+    const [showForgotNotice, setShowForgotNotice] = useState(false);
+
     const { login } = useContext(AuthContext);
     const navigate = useNavigate();
+
+    const validateForm = () => {
+        const errors = {};
+        if (!identifier.trim()) {
+            errors.identifier = 'Please enter your username or email address.';
+        }
+        if (!password) {
+            errors.password = 'Please enter your password.';
+        }
+        setFieldErrors(errors);
+        return Object.keys(errors).length === 0;
+    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
+
+        if (!validateForm() || submitting) {
+            return;
+        }
+
+        setSubmitting(true);
         try {
-            await login(username, password);
+            await login(identifier.trim(), password);
             navigate('/dashboard');
         } catch (err) {
             const data = err.response?.data;
@@ -41,60 +63,119 @@ const Login = () => {
             } else if (err.message) {
                 msg = `Network error (${err.message}). Verify backend server is running and reachable.`;
             }
-            setError(msg || 'Login failed. Please check your credentials.');
+            setError(msg || 'Invalid username, email, or password. Please try again.');
+        } finally {
+            setSubmitting(false);
         }
     };
 
     return (
-        <div style={{ maxWidth: '420px', margin: '4rem auto' }}>
-            <Card className="card-glass">
-                <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-                    <h2>Welcome Back</h2>
-                    <p style={{ color: 'var(--text-secondary)' }}>Log in to access your research projects</p>
+        <div className="auth-page">
+            <div className="auth-card">
+                <div className="auth-header">
+                    <span className="auth-brand-badge">NForge Research</span>
+                    <h2 className="auth-title">Welcome Back</h2>
+                    <p className="auth-subtitle">Sign in to access your projects and research workspace</p>
                 </div>
-                
+
                 {error && (
-                    <div style={{ 
-                        padding: '0.75rem', 
-                        marginBottom: '1.5rem', 
-                        background: 'rgba(239, 68, 68, 0.1)', 
-                        border: '1px solid var(--danger)',
-                        borderRadius: 'var(--radius-md)',
-                        color: 'var(--danger)',
-                        fontSize: '0.875rem'
-                    }}>
-                        {error}
+                    <div className="auth-alert auth-alert-error" role="alert">
+                        <svg className="auth-alert-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="12" y1="8" x2="12" y2="12"></line>
+                            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                        </svg>
+                        <div>{error}</div>
                     </div>
                 )}
-                
-                <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                    <Input 
-                        label="Username"
-                        id="username"
-                        type="text" 
-                        placeholder="Enter your username" 
-                        value={username}
-                        onChange={(e) => setUsername(e.target.value)}
+
+                {showForgotNotice && (
+                    <div className="auth-alert auth-alert-info">
+                        <svg className="auth-alert-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="12" y1="16" x2="12" y2="12"></line>
+                            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                        </svg>
+                        <div>
+                            <strong>Account Recovery:</strong> Self-service password recovery is not yet configured for this workspace. Please contact your system administrator to reset your credentials.
+                        </div>
+                    </div>
+                )}
+
+                <form onSubmit={handleSubmit} className="auth-form" noValidate>
+                    <Input
+                        label="Username or Email Address"
+                        id="login-identifier"
+                        type="text"
+                        placeholder="e.g. marie_curie or marie@radium.org"
+                        value={identifier}
+                        onChange={(e) => {
+                            setIdentifier(e.target.value);
+                            if (fieldErrors.identifier) {
+                                setFieldErrors((prev) => ({ ...prev, identifier: '' }));
+                            }
+                        }}
+                        error={fieldErrors.identifier}
                         required
+                        autoComplete="username"
+                        disabled={submitting}
                     />
-                    <Input 
-                        label="Password"
-                        id="password"
-                        type="password" 
-                        placeholder="Enter your password" 
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        required
-                    />
-                    <Button type="submit" style={{ width: '100%', marginTop: '0.5rem', padding: '0.75rem' }}>
-                        Sign In
+
+                    <div>
+                        <div className="auth-field-header-row">
+                            <label htmlFor="login-password" className="input-label" style={{ marginBottom: 0 }}>
+                                Password <span className="required-star" aria-hidden="true">*</span>
+                            </label>
+                            <button
+                                type="button"
+                                className="auth-forgot-btn"
+                                onClick={() => setShowForgotNotice((prev) => !prev)}
+                            >
+                                Forgot password?
+                            </button>
+                        </div>
+                        <Input
+                            id="login-password"
+                            type="password"
+                            placeholder="Enter your password"
+                            value={password}
+                            onChange={(e) => {
+                                setPassword(e.target.value);
+                                if (fieldErrors.password) {
+                                setFieldErrors((prev) => ({ ...prev, password: '' }));
+                                }
+                            }}
+                            error={fieldErrors.password}
+                            required
+                            showPasswordToggle={true}
+                            autoComplete="current-password"
+                            disabled={submitting}
+                        />
+                    </div>
+
+                    <Button
+                        type="submit"
+                        className="auth-submit-btn"
+                        disabled={submitting}
+                    >
+                        {submitting ? (
+                            <>
+                                <span className="auth-spinner" aria-hidden="true"></span>
+                                <span>Signing in...</span>
+                            </>
+                        ) : (
+                            'Sign In'
+                        )}
                     </Button>
                 </form>
-                
-                <div style={{ marginTop: '2rem', textAlign: 'center', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                    Don't have an account? <Link to="/register" style={{ color: 'var(--accent-primary)', fontWeight: '500' }}>Sign up</Link>
+
+                <div className="auth-footer">
+                    Don't have an account?{' '}
+                    <Link to="/register" className="auth-footer-link">
+                        Create an account
+                    </Link>
                 </div>
-            </Card>
+            </div>
         </div>
     );
 };

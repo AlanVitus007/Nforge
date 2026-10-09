@@ -24,17 +24,35 @@ export const AuthProvider = ({ children }) => {
         fetchUser();
     }, []);
 
-    const login = async (username, password) => {
-        const response = await api.post('/auth/login/', { username, password });
+    const login = async (usernameOrEmail, password) => {
+        let payload;
+        if (typeof usernameOrEmail === 'object' && usernameOrEmail !== null) {
+            payload = usernameOrEmail;
+        } else {
+            payload = { username: usernameOrEmail, password };
+        }
+        const response = await api.post('/auth/login/', payload);
         localStorage.setItem('token', response.data.token);
         setUser(response.data.user);
+        return response.data;
     };
 
-    const register = async (username, email, password) => {
-        await api.post('/auth/register/', { username, email, password });
-        // Automatically login after successful registration or let user login manually
-        // We'll let them login manually for simplicity, or just login here:
-        // await login(username, password);
+    const register = async (dataOrUsername, email, password, firstName, lastName, confirmPassword) => {
+        let payload;
+        if (typeof dataOrUsername === 'object' && dataOrUsername !== null) {
+            payload = dataOrUsername;
+        } else {
+            payload = {
+                username: dataOrUsername,
+                email,
+                password,
+                first_name: firstName,
+                last_name: lastName,
+                confirm_password: confirmPassword || password,
+            };
+        }
+        const response = await api.post('/auth/register/', payload);
+        return response.data;
     };
 
     const logout = async () => {
