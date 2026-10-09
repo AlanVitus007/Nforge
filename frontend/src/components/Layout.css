@@ -415,13 +415,12 @@
 }
 
 .main-content.workspace-main-content {
-  padding-top: 0.4rem;
-  padding-bottom: 1.25rem;
+  padding-top: 0.25rem;
+  padding-bottom: 0.5rem;
   padding-left: 0;
   padding-right: 0;
   width: 100%;
   max-width: 100%;
-  min-height: calc(100vh - 4rem);
   box-sizing: border-box;
   display: flex;
   flex-direction: column;

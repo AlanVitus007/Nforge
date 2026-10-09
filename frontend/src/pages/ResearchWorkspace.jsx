@@ -408,12 +408,12 @@ function ResearchWorkspace() {
     const lastScrolledSessionIdRef = useRef(null);
     const prevMessageCountRef = useRef(0);
 
-    // Auto-resize composer textarea height between ~80px default (min 75px) and 160px
+    // Auto-resize composer textarea height between ~65px default (min 55px) and 140px
     useEffect(() => {
         if (textareaRef.current) {
             textareaRef.current.style.height = 'auto';
             const scrollH = textareaRef.current.scrollHeight;
-            const targetH = scrollH <= 85 ? 80 : Math.min(scrollH, 160);
+            const targetH = scrollH <= 72 ? 65 : Math.min(scrollH, 140);
             textareaRef.current.style.height = `${targetH}px`;
         }
     }, [questionText]);
@@ -2020,7 +2020,7 @@ function ResearchWorkspace() {
                                                 onChange={(e) => setQuestionText(e.target.value)}
                                                 onKeyDown={handleKeyDown}
                                                 disabled={isViewer || loadingAsk}
-                                                rows={3}
+                                                rows={2}
                                             />
                                             <div className="composer-bottom-bar">
                                                 <div className="composer-key-hint">
