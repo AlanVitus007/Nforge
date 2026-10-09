@@ -61,12 +61,10 @@ function EvidenceSource({ source, projectId }) {
                     fontSize: "0.825rem",
                     color: "var(--text-secondary)",
                     fontStyle: "italic",
-                    lineHeight: "1.4",
+                    lineHeight: "1.45",
                     borderLeft: "3px solid var(--accent-primary)",
                     paddingLeft: "0.65rem",
                     whiteSpace: "pre-wrap",
-                    maxHeight: "85px",
-                    overflowY: "auto",
                 }}>
                     "{source.text}"
                 </p>

@@ -3,15 +3,12 @@
   width: 100%;
   max-width: 1600px;
   margin: 0 auto;
-  padding: 0 1rem 0.5rem;
+  padding: 0 1rem 0.75rem;
   box-sizing: border-box;
-  height: 100%;
-  max-height: 100%;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  min-height: 0;
   flex: 1;
+  min-height: calc(100vh - 5.5rem);
 }
 
 /* ── Top Bar / Breadcrumb ── */
@@ -103,14 +100,12 @@
 /* ── 2-Column Responsive Workspace Grid ── */
 .workspace-grid {
   display: grid;
-  grid-template-columns: 290px minmax(0, 1fr);
+  grid-template-columns: 285px minmax(0, 1fr);
   gap: 1rem;
   align-items: stretch;
   flex: 1;
+  width: 100%;
   min-height: 0;
-  height: 100%;
-  max-height: 100%;
-  overflow: hidden;
 }
 
 @media (max-width: 960px) {
@@ -132,8 +127,10 @@
   flex-direction: column;
   box-shadow: var(--shadow-sm);
   overflow: hidden;
-  height: 100%;
-  min-height: 0;
+  position: sticky;
+  top: 4.5rem;
+  height: calc(100vh - 6.5rem);
+  min-height: 520px;
   flex-shrink: 0;
 }
 
@@ -381,29 +378,22 @@
   outline: none;
 }
 
-/* ── Main Workspace Layout (Clean 3-row grid) ── */
+/* ── Main Workspace Layout (Spacious flex column) ── */
 .workspace-main {
   position: relative;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-xl);
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  grid-template-areas:
-    "header"
-    "conversation"
-    "composer";
-  height: 100%;
-  max-height: 100%;
-  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 6.5rem);
+  min-height: 520px;
   box-shadow: var(--shadow-sm);
   overflow: hidden;
 }
 
-/* ── Top Header Group (Row 1) ── */
+/* ── Top Header Group ── */
 .workspace-header-group {
-  grid-area: header;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -413,14 +403,14 @@
 }
 
 .workspace-active-header {
-  padding: 0.45rem 1rem;
+  padding: 0.35rem 1rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
   gap: 0.5rem;
   flex-shrink: 0;
-  min-height: 42px;
+  min-height: 38px;
   box-sizing: border-box;
 }
 
@@ -430,7 +420,7 @@
 }
 
 .active-session-title {
-  font-size: 1.05rem;
+  font-size: 0.98rem;
   font-weight: 700;
   margin: 0;
   color: var(--text-primary);
@@ -494,15 +484,15 @@
 }
 
 .active-session-meta {
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   color: var(--text-muted);
-  margin-top: 0.15rem;
+  margin-top: 0.1rem;
 }
 
 .active-session-actions {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.35rem;
 }
 
 .action-btn-primary {
@@ -510,8 +500,8 @@
   border: 1px solid var(--accent-primary);
   color: #ffffff;
   border-radius: var(--radius-md);
-  padding: 0.3rem 0.75rem;
-  font-size: 0.8rem;
+  padding: 0.22rem 0.65rem;
+  font-size: 0.76rem;
   font-weight: 600;
   cursor: pointer;
   transition: all var(--transition-fast);
@@ -527,8 +517,8 @@
   border: 1px solid var(--border-color);
   color: var(--text-primary);
   border-radius: var(--radius-md);
-  padding: 0.3rem 0.7rem;
-  font-size: 0.8rem;
+  padding: 0.22rem 0.6rem;
+  font-size: 0.76rem;
   font-weight: 600;
   cursor: pointer;
   transition: all var(--transition-fast);
@@ -544,8 +534,8 @@
   border: 1px solid rgba(239, 68, 68, 0.3);
   color: var(--danger);
   border-radius: var(--radius-md);
-  padding: 0.3rem 0.7rem;
-  font-size: 0.8rem;
+  padding: 0.22rem 0.6rem;
+  font-size: 0.76rem;
   font-weight: 600;
   cursor: pointer;
   transition: all var(--transition-fast);
@@ -558,22 +548,22 @@
 
 /* ── Attached Papers Bar (Compact Row) ── */
 .workspace-papers-bar {
-  padding: 0.3rem 1rem;
+  padding: 0.22rem 1rem;
   background: var(--bg-tertiary);
   border-top: 1px solid var(--border-color);
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.6rem;
   flex-shrink: 0;
-  min-height: 36px;
+  min-height: 32px;
   box-sizing: border-box;
 }
 
 .papers-bar-left {
   display: flex;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0.5rem;
   flex-shrink: 0;
 }
 
@@ -585,7 +575,7 @@
 }
 
 .papers-bar-title {
-  font-size: 0.74rem;
+  font-size: 0.72rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -594,9 +584,9 @@
 }
 
 .papers-count-badge {
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   font-weight: 700;
-  padding: 0.05rem 0.4rem;
+  padding: 0.04rem 0.35rem;
   border-radius: var(--radius-full);
   background: rgba(37, 99, 235, 0.12);
   color: var(--accent-primary);
@@ -607,8 +597,8 @@
   border: 1px solid var(--border-color);
   color: var(--accent-primary);
   border-radius: var(--radius-sm);
-  padding: 0.18rem 0.55rem;
-  font-size: 0.74rem;
+  padding: 0.14rem 0.5rem;
+  font-size: 0.72rem;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
@@ -632,21 +622,21 @@
   white-space: nowrap;
   scrollbar-width: thin;
   scrollbar-color: var(--border-color) transparent;
-  padding: 0.1rem 0;
+  padding: 0.05rem 0;
 }
 
 .paper-tag-pill {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  padding: 0.15rem 0.55rem;
+  padding: 0.12rem 0.5rem;
   border-radius: var(--radius-full);
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
-  font-size: 0.74rem;
+  font-size: 0.72rem;
   color: var(--text-primary);
   max-width: 250px;
-  line-height: 1.3;
+  line-height: 1.25;
   flex-shrink: 0;
 }
 
@@ -679,15 +669,14 @@
   font-style: italic;
 }
 
-/* ── Conversation Messages Flow (Row 2 - Dominant Area: 70–80%+ vertical space) ── */
+/* ── Conversation Messages Flow (Dominant Area: 75–85%+ vertical space) ── */
 .conversation-scroll-area {
-  grid-area: conversation;
-  padding: 1.5rem 1.5rem 1.25rem;
+  padding: 0.85rem 1.25rem 0.65rem;
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
-  min-height: 0;
-  height: 100%;
+  gap: 1.15rem;
+  flex: 1;
+  min-height: 250px;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: thin;
@@ -736,7 +725,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  margin-bottom: 0.4rem;
+  margin-bottom: 0.35rem;
   display: flex;
   align-items: center;
   gap: 0.4rem;
@@ -757,7 +746,7 @@
   color: #ffffff;
   border-radius: var(--radius-xl);
   border-bottom-right-radius: 0.25rem;
-  padding: 1rem 1.4rem;
+  padding: 0.75rem 1.15rem;
   box-shadow: var(--shadow-sm);
 }
 
@@ -777,7 +766,7 @@
   border: 1px solid var(--border-color);
   border-radius: var(--radius-xl);
   border-bottom-left-radius: 0.25rem;
-  padding: 1.4rem 1.65rem;
+  padding: 1.15rem 1.4rem;
   box-shadow: var(--shadow-sm);
   color: var(--text-primary);
   box-sizing: border-box;
@@ -788,14 +777,10 @@
 }
 
 .message-evidence-container {
-  margin-top: 1.15rem;
-  padding-top: 0.95rem;
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
   border-top: 1px dashed var(--border-color);
-  max-height: 260px;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-color) transparent;
-  padding-right: 0.35rem;
+  padding-right: 0.2rem;
 }
 
 .evidence-header-label {
@@ -838,12 +823,11 @@
   animation: spin 0.7s linear infinite;
 }
 
-/* ── Spacious Bottom Composer (Row 3) ── */
+/* ── Compact Bottom Composer ── */
 .workspace-composer {
   position: relative;
-  grid-area: composer;
   flex-shrink: 0;
-  padding: 12px 20px 18px;
+  padding: 8px 16px 12px;
   background: var(--bg-primary);
   border-top: 1px solid var(--border-color);
   box-sizing: border-box;
@@ -856,24 +840,24 @@
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 0.35rem;
 }
 
 /* Floating Scroll to Latest Pill */
 .scroll-to-bottom-pill {
   position: absolute;
-  top: -2.6rem;
-  right: 2rem;
+  top: -2.35rem;
+  right: 1.75rem;
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.35rem 0.8rem;
+  padding: 0.3rem 0.75rem;
   border-radius: var(--radius-full);
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
   box-shadow: var(--shadow-md);
   color: var(--text-primary);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
   z-index: 30;
@@ -896,7 +880,7 @@
 .composer-shortcuts-row {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
   overflow-x: auto;
   white-space: nowrap;
   scrollbar-width: none;
@@ -907,7 +891,7 @@
 }
 
 .composer-shortcuts-label {
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -921,7 +905,7 @@
 .composer-shortcuts-chips {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.35rem;
   flex-wrap: wrap;
 }
 
@@ -929,14 +913,14 @@
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-full);
-  padding: 0.25rem 0.65rem;
-  font-size: 0.75rem;
+  padding: 0.16rem 0.55rem;
+  font-size: 0.72rem;
   font-weight: 500;
   color: var(--text-secondary);
   cursor: pointer;
   transition: all var(--transition-fast);
   white-space: nowrap;
-  line-height: 1.3;
+  line-height: 1.25;
 }
 
 .composer-shortcut-chip:hover:not(:disabled) {
@@ -951,15 +935,15 @@
   cursor: not-allowed;
 }
 
-/* Large Composer Card */
+/* Compact Composer Card */
 .composer-card {
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-xl);
-  padding: 14px 18px 12px;
+  border-radius: var(--radius-lg);
+  padding: 8px 14px 6px;
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
+  gap: 0.35rem;
   box-shadow: var(--shadow-sm);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
@@ -971,18 +955,20 @@
 
 .composer-textarea {
   width: 100%;
-  min-height: 110px;
-  max-height: 240px;
+  height: 80px;
+  min-height: 75px;
+  max-height: 160px;
   resize: vertical;
   background: transparent;
   border: none;
   outline: none;
   font-family: inherit;
-  font-size: 0.95rem;
-  line-height: 1.6;
+  font-size: 0.925rem;
+  line-height: 1.5;
   color: var(--text-primary);
   box-sizing: border-box;
   padding: 0;
+  overflow-y: auto;
 }
 
 .composer-textarea::placeholder {
@@ -998,13 +984,13 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-top: 0.5rem;
+  padding-top: 0.35rem;
   border-top: 1px solid var(--border-color);
-  gap: 0.75rem;
+  gap: 0.6rem;
 }
 
 .composer-key-hint {
-  font-size: 0.76rem;
+  font-size: 0.72rem;
   color: var(--text-muted);
 }
 
@@ -1012,22 +998,22 @@
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  padding: 0.1rem 0.35rem;
+  padding: 0.08rem 0.3rem;
   font-family: monospace;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   color: var(--text-secondary);
 }
 
 .composer-send-btn {
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
-  padding: 0.55rem 1.25rem;
+  gap: 0.4rem;
+  padding: 0.45rem 1.1rem;
   background: var(--accent-primary);
   color: #ffffff;
   border: none;
-  border-radius: var(--radius-lg);
-  font-size: 0.875rem;
+  border-radius: var(--radius-md);
+  font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
   transition: all var(--transition-fast);
@@ -1687,8 +1673,14 @@
     padding: 0 0.5rem 0.25rem;
   }
 
+  .workspace-main {
+    height: calc(100vh - 5.5rem);
+    min-height: 480px;
+  }
+
   .workspace-active-header {
-    padding: 0.4rem 0.75rem;
+    padding: 0.3rem 0.6rem;
+    min-height: 36px;
   }
 
   .active-title-rename-input {
@@ -1697,45 +1689,47 @@
   }
 
   .workspace-papers-bar {
-    padding: 0.3rem 0.75rem;
+    padding: 0.2rem 0.6rem;
     flex-wrap: wrap;
     min-height: auto;
   }
 
   .conversation-scroll-area {
-    padding: 1rem 0.75rem 0.85rem;
-    gap: 1rem;
+    padding: 0.65rem 0.75rem 0.5rem;
+    gap: 0.85rem;
   }
 
   .message-card.user {
     max-width: 90%;
-    padding: 0.85rem 1.1rem;
+    padding: 0.7rem 0.95rem;
   }
 
   .message-card.assistant {
-    padding: 1.1rem 1.15rem;
+    padding: 0.95rem 1.05rem;
   }
 
   .workspace-composer {
-    padding: 10px 12px 14px;
+    padding: 6px 10px 10px;
   }
 
   .composer-card {
-    padding: 10px 12px 8px;
+    padding: 6px 10px 6px;
   }
 
   .composer-textarea {
-    min-height: 85px;
-    font-size: 0.9rem;
+    height: 75px;
+    min-height: 70px;
+    max-height: 140px;
+    font-size: 0.875rem;
   }
 
   .composer-send-btn {
-    padding: 0.45rem 1rem;
+    padding: 0.4rem 0.85rem;
     font-size: 0.8rem;
   }
 
   .scroll-to-bottom-pill {
-    right: 1rem;
-    top: -2.3rem;
+    right: 0.75rem;
+    top: -2.2rem;
   }
 }

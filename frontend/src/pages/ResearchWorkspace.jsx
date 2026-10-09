@@ -401,11 +401,22 @@ function ResearchWorkspace() {
 
     const chatScrollRef = useRef(null);
     const messagesEndRef = useRef(null);
+    const textareaRef = useRef(null);
     const currentSelectIdRef = useRef(null);
     const [isNearBottom, setIsNearBottom] = useState(true);
     const isNearBottomRef = useRef(true);
     const lastScrolledSessionIdRef = useRef(null);
     const prevMessageCountRef = useRef(0);
+
+    // Auto-resize composer textarea height between ~80px default (min 75px) and 160px
+    useEffect(() => {
+        if (textareaRef.current) {
+            textareaRef.current.style.height = 'auto';
+            const scrollH = textareaRef.current.scrollHeight;
+            const targetH = scrollH <= 85 ? 80 : Math.min(scrollH, 160);
+            textareaRef.current.style.height = `${targetH}px`;
+        }
+    }, [questionText]);
 
     // Redirect if unauthenticated
     useEffect(() => {
@@ -1998,6 +2009,7 @@ function ResearchWorkspace() {
                                     {activeSession.papers && activeSession.papers.length > 0 ? (
                                         <div className="composer-card">
                                             <textarea
+                                                ref={textareaRef}
                                                 className="composer-textarea"
                                                 placeholder={
                                                     isViewer
@@ -2008,7 +2020,7 @@ function ResearchWorkspace() {
                                                 onChange={(e) => setQuestionText(e.target.value)}
                                                 onKeyDown={handleKeyDown}
                                                 disabled={isViewer || loadingAsk}
-                                                rows={4}
+                                                rows={3}
                                             />
                                             <div className="composer-bottom-bar">
                                                 <div className="composer-key-hint">
