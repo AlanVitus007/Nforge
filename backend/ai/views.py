@@ -134,10 +134,21 @@ def ask_ai(request):
                 search_results = semantic_search(question, paper, top_k=5)
                 ai_response = generate_ai_answer(question, search_results, relevant_notes=relevant_notes)
 
+                notes_used = ai_response.get("notes_used", [])
+                notes_used_count = ai_response.get("notes_used_count", len(notes_used))
+                msg_metadata = {}
+                if notes_used_count > 0:
+                    msg_metadata = {
+                        "notes_used": notes_used,
+                        "notes_used_count": notes_used_count,
+                        "user_id": request.user.id,
+                    }
+
                 assistant_msg = ResearchMessage.objects.create(
                     session=session,
                     role=ResearchMessage.ROLE_ASSISTANT,
                     content=ai_response["answer"],
+                    metadata=msg_metadata,
                 )
 
                 created_evidences = []
@@ -248,10 +259,21 @@ def research_ask_view(request):
                 relevant_notes=relevant_notes,
             )
 
+            notes_used = ai_response.get("notes_used", [])
+            notes_used_count = ai_response.get("notes_used_count", len(notes_used))
+            msg_metadata = {}
+            if notes_used_count > 0:
+                msg_metadata = {
+                    "notes_used": notes_used,
+                    "notes_used_count": notes_used_count,
+                    "user_id": request.user.id,
+                }
+
             assistant_msg = ResearchMessage.objects.create(
                 session=session,
                 role=ResearchMessage.ROLE_ASSISTANT,
                 content=ai_response["answer"],
+                metadata=msg_metadata,
             )
 
             created_evidences = []
@@ -1288,7 +1310,7 @@ def session_detail_view(request, session_id):
                 }, status=status.HTTP_400_BAD_REQUEST)
 
         if request.method == "GET":
-            serializer = ResearchSessionDetailSerializer(session)
+            serializer = ResearchSessionDetailSerializer(session, context={"request": request})
             return Response(serializer.data, status=status.HTTP_200_OK)
 
         elif request.method == "PATCH":
@@ -1343,7 +1365,7 @@ def session_detail_view(request, session_id):
                 "messages__evidence__chunk"
             ).get(id=session.id)
 
-            serializer = ResearchSessionDetailSerializer(session)
+            serializer = ResearchSessionDetailSerializer(session, context={"request": request})
             return Response(serializer.data, status=status.HTTP_200_OK)
 
         elif request.method == "DELETE":
