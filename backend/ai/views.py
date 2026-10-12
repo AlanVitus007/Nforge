@@ -29,6 +29,8 @@ from .services import (
     generate_research_answer,
     RateLimitError,
 )
+from .mcp_client import is_mcp_enabled, MCPUnavailableError, MCPError
+from .mcp_orchestrator import execute_gemini_mcp_turn
 
 
 
@@ -39,6 +41,18 @@ def handle_ai_exception(e):
     Returns structured JSON with appropriate HTTP status code.
     """
     err_msg = str(e)
+    if isinstance(e, MCPUnavailableError):
+        return Response({
+            "error": "MCP tool server is unavailable. Cannot process request in MCP mode.",
+            "code": "MCP_UNAVAILABLE"
+        }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    if isinstance(e, MCPError):
+        return Response({
+            "error": f"MCP tool execution failed: {err_msg}",
+            "code": "MCP_ERROR"
+        }, status=status.HTTP_502_BAD_GATEWAY)
+
     if isinstance(e, RateLimitError) or "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
         return Response({
             "error": "Gemini API rate limit exceeded. Please try again later.",
@@ -131,8 +145,25 @@ def ask_ai(request):
                     content=question,
                 )
 
-                search_results = semantic_search(question, paper, top_k=5)
-                ai_response = generate_ai_answer(question, search_results, relevant_notes=relevant_notes)
+                if is_mcp_enabled():
+                    system_instruction = f"""You are an academic research assistant for NForge.
+Answer questions about the research paper '{paper.title}' (Paper ID: {paper.id}).
+You have access to NForge tools via MCP.
+- If you need textual evidence from this paper, call `search_paper_evidence` with paper_id={paper.id}.
+- If the user asks about personal notes, call `search_my_notes` with paper_id={paper.id}.
+- Personal notes are user interpretations, not verified scientific evidence. Always prefer original paper evidence.
+- If no tool is needed (e.g. conversational greeting), respond directly.
+- Base every factual statement strictly on retrieved evidence.
+"""
+                    ai_response = execute_gemini_mcp_turn(
+                        user=request.user,
+                        system_instruction=system_instruction,
+                        user_prompt=question,
+                        feature_name="ask_ai_mcp",
+                    )
+                else:
+                    search_results = semantic_search(question, paper, top_k=5)
+                    ai_response = generate_ai_answer(question, search_results, relevant_notes=relevant_notes)
 
                 notes_used = ai_response.get("notes_used", [])
                 notes_used_count = ai_response.get("notes_used_count", len(notes_used))
@@ -177,8 +208,25 @@ def ask_ai(request):
                 ai_response["session_id"] = session.id
                 return Response(ai_response, status=status.HTTP_200_OK)
         else:
-            search_results = semantic_search(question, paper, top_k=5)
-            ai_response = generate_ai_answer(question, search_results, relevant_notes=relevant_notes)
+            if is_mcp_enabled():
+                system_instruction = f"""You are an academic research assistant for NForge.
+Answer questions about the research paper '{paper.title}' (Paper ID: {paper.id}).
+You have access to NForge tools via MCP.
+- If you need textual evidence from this paper, call `search_paper_evidence` with paper_id={paper.id}.
+- If the user asks about personal notes, call `search_my_notes` with paper_id={paper.id}.
+- Personal notes are user interpretations, not verified scientific evidence. Always prefer original paper evidence.
+- If no tool is needed (e.g. conversational greeting), respond directly.
+- Base every factual statement strictly on retrieved evidence.
+"""
+                ai_response = execute_gemini_mcp_turn(
+                    user=request.user,
+                    system_instruction=system_instruction,
+                    user_prompt=question,
+                    feature_name="ask_ai_mcp",
+                )
+            else:
+                search_results = semantic_search(question, paper, top_k=5)
+                ai_response = generate_ai_answer(question, search_results, relevant_notes=relevant_notes)
             return Response(ai_response, status=status.HTTP_200_OK)
 
     except Exception as e:
@@ -253,11 +301,31 @@ def research_ask_view(request):
                 content=question.strip(),
             )
 
-            ai_response = generate_research_answer(
-                question.strip(),
-                session,
-                relevant_notes=relevant_notes,
-            )
+            if is_mcp_enabled():
+                paper_list_str = ", ".join([f"'{p.title}' (ID: {p.id})" for p in session_papers])
+                system_instruction = f"""You are an academic research assistant synthesizing findings across multiple papers in an NForge Research Workspace session.
+Attached papers in this session (Session ID: {session.id}): {paper_list_str}.
+You have access to NForge tools via MCP:
+- To inspect session context and recent history, call `get_research_session_context` with session_id={session.id}.
+- To retrieve evidence from a specific paper, call `search_paper_evidence` with that paper's ID.
+- To compare multiple papers, call `compare_papers` with the relevant paper IDs from this session.
+- To search personal research notes, call `search_my_notes`.
+- Personal notes are hypotheses or interpretations, not verified evidence. Always ground factual claims in published paper sources.
+- If no tool is needed, answer directly.
+- Synthesize a unified, grounded research answer using the evidence retrieved from the tools.
+"""
+                ai_response = execute_gemini_mcp_turn(
+                    user=request.user,
+                    system_instruction=system_instruction,
+                    user_prompt=question.strip(),
+                    feature_name="research_ask_mcp",
+                )
+            else:
+                ai_response = generate_research_answer(
+                    question.strip(),
+                    session,
+                    relevant_notes=relevant_notes,
+                )
 
             notes_used = ai_response.get("notes_used", [])
             notes_used_count = ai_response.get("notes_used_count", len(notes_used))
